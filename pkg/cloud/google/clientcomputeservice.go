@@ -23,16 +23,25 @@ import (
 )
 
 type GCEClientComputeService interface {
-	ImagesGet(ctx context.Context, project, image string) (*compute.Image, error)
-	ImagesGetFromFamily(ctx context.Context, project, family string) (*compute.Image, error)
-	InstancesDelete(ctx context.Context, project, zone, targetInstance string) (*compute.Operation, error)
-	InstancesGet(ctx context.Context, project, zone string, instance string) (*compute.Instance, error)
-	InstancesInsert(ctx context.Context, project, zone string, instance *compute.Instance) (*compute.Operation, error)
+	ImagesGet(project string, image string) (*compute.Image, error)
+	ImagesGetFromFamily(project string, family string) (*compute.Image, error)
+
+	InstancesDelete(project string, zone string, targetInstance string) (*compute.Operation, error)
+	InstancesGet(project string, zone string, instance string) (*compute.Instance, error)
+	InstancesInsert(project string, zone string, instance *compute.Instance) (*compute.Operation, error)
 	InstancesInsertFromTemplate(ctx context.Context, project, zone, instanceName, instanceTemplate string) (*compute.Operation, error)
-	ZoneOperationsGet(ctx context.Context, project, zone, operation string) (*compute.Operation, error)
-	GlobalOperationsGet(ctx context.Context, project, operation string) (*compute.Operation, error)
-	FirewallsGet(ctx context.Context, project string) (*compute.FirewallList, error)
-	FirewallsInsert(ctx context.Context, project string, firewallRule *compute.Firewall) (*compute.Operation, error)
-	FirewallsDelete(ctx context.Context, project, name string) (*compute.Operation, error)
-	WaitForOperation(ctx context.Context, project string, op *compute.Operation) error
+
+	ZoneOperationsGet(project string, zone string, operation string) (*compute.Operation, error)
+	GlobalOperationsGet(project string, operation string) (*compute.Operation, error)
+	WaitForOperation(project string, op *compute.Operation) error
+
+	FirewallsGet(project string) (*compute.FirewallList, error)
+	FirewallsInsert(project string, firewallRule *compute.Firewall) (*compute.Operation, error)
+	FirewallsDelete(project string, name string) (*compute.Operation, error)
+
+	InstanceGroupManagersGet(project, zone, igm string) (*compute.InstanceGroupManager, error)
+	InstanceGroupManagersInsert(project, zone string, igm *compute.InstanceGroupManager) (*compute.Operation, error)
+	InstanceGroupManagersDelete(project, zone, igm string) (*compute.Operation, error)
+	InstanceGroupManagersResize(project, zone, igm string, size int64) (*compute.Operation, error)
+	InstanceGroupManagersListInstances(project, zone, igm string) (*compute.InstanceGroupManagersListManagedInstancesResponse, error)
 }

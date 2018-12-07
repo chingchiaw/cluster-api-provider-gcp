@@ -112,7 +112,7 @@ type MachineActuatorParams struct {
 }
 
 func NewMachineActuator(params MachineActuatorParams) (*GCEClient, error) {
-	computeService, err := getOrNewComputeServiceForMachine(params)
+	computeService, err := getOrNewComputeServiceForMachine(params.ComputeService, params.CloudConfigPath)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +265,6 @@ func (gce *GCEClient) Create(ctx context.Context, cluster *clusterv1.Cluster, ma
 	if err == nil {
 		err = gce.computeService.WaitForOperation(ctx, machineConfig.Project, op)
 	}
-
 	if err != nil {
 		return gce.handleMachineError(machine, apierrors.CreateMachine(
 			"error creating GCE instance: %v", err), createEventAction)
@@ -754,17 +753,17 @@ func getOrNewKubeadm(params MachineActuatorParams) GCEClientKubeadm {
 	return params.Kubeadm
 }
 
-func getOrNewComputeServiceForMachine(params MachineActuatorParams) (GCEClientComputeService, error) {
-	if params.ComputeService != nil {
-		return params.ComputeService, nil
+func getOrNewComputeServiceForMachine(computeService GCEClientComputeService, cloudConfigPath string) (GCEClientComputeService, error) {
+	if computeService != nil {
+		return computeService, nil
 	}
 
 	var client *http.Client
 	var err error
 	// If specified in the GCE config, use the alternative authentication.
-	if params.CloudConfigPath != "" {
+	if cloudConfigPath != "" {
 		glog.Info("Trying to get open the GCE config")
-		client, err = clientWithAltTokenSource(params.CloudConfigPath)
+		client, err = clientWithAltTokenSource(cloudConfigPath)
 		if err != nil {
 			glog.Fatalf("Error creating an alternative auth client: %q", err)
 		}
@@ -778,7 +777,7 @@ func getOrNewComputeServiceForMachine(params MachineActuatorParams) (GCEClientCo
 		}
 	}
 
-	computeService, err := clients.NewComputeService(client)
+	computeService, err = clients.NewComputeService(client)
 	if err != nil {
 		return nil, err
 	}
