@@ -336,9 +336,10 @@ func newGCEMachineProviderSpecFixture() gceconfigv1.GCEMachineProviderSpec {
 		Roles: []gceconfigv1.MachineRole{
 			gceconfigv1.MasterRole,
 		},
-		Zone:  "us-west5-f",
-		OS:    "os-name",
-		Disks: make([]gceconfigv1.Disk, 0),
+		MachineType: "n1-standard-1",
+		Zone:        "us-west5-f",
+		OS:          "os-name",
+		Disks:       make([]gceconfigv1.Disk, 0),
 	}
 }
 

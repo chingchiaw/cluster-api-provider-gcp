@@ -37,6 +37,8 @@ spec:
             - initializeParams
             type: object
           type: array
+        instanceTemplate:
+          type: string
         kind:
           description: 'Kind is a string value representing the REST resource this
             object represents. Servers may infer this from the endpoint the client
@@ -57,7 +59,6 @@ spec:
           type: string
       required:
       - zone
-      - machineType
   version: v1alpha1
 status:
   acceptedNames:
