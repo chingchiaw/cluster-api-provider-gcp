@@ -17,9 +17,10 @@ limitations under the License.
 package google
 
 import (
+	"context"
 	"fmt"
 
-	"golang.org/x/net/context"
+	"github.com/golang/glog"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/compute/v1"
 	"k8s.io/klog"
@@ -57,8 +58,9 @@ func NewClusterActuator(m manager.Manager, params ClusterActuatorParams) (*GCECl
 }
 
 func (gce *GCEClusterClient) Reconcile(cluster *clusterv1.Cluster) error {
-	klog.Infof("Reconciling cluster %v.", cluster.Name)
-	err := gce.createFirewallRuleIfNotExists(cluster, &compute.Firewall{
+	glog.Infof("Reconciling cluster %v.", cluster.Name)
+	ctx := context.TODO()
+	err := gce.createFirewallRuleIfNotExists(ctx, cluster, &compute.Firewall{
 		Name:    cluster.Name + firewallRuleInternalSuffix,
 		Network: "global/networks/default",
 		Allowed: []*compute.FirewallAllowed{
@@ -72,7 +74,7 @@ func (gce *GCEClusterClient) Reconcile(cluster *clusterv1.Cluster) error {
 	if err != nil {
 		klog.Warningf("Error creating firewall rule for internal cluster traffic: %v", err)
 	}
-	err = gce.createFirewallRuleIfNotExists(cluster, &compute.Firewall{
+	err = gce.createFirewallRuleIfNotExists(ctx, cluster, &compute.Firewall{
 		Name:    cluster.Name + firewallRuleApiSuffix,
 		Network: "global/networks/default",
 		Allowed: []*compute.FirewallAllowed{
@@ -91,11 +93,12 @@ func (gce *GCEClusterClient) Reconcile(cluster *clusterv1.Cluster) error {
 }
 
 func (gce *GCEClusterClient) Delete(cluster *clusterv1.Cluster) error {
-	err := gce.deleteFirewallRule(cluster, cluster.Name+firewallRuleInternalSuffix)
+	ctx := context.TODO()
+	err := gce.deleteFirewallRule(ctx, cluster, cluster.Name+firewallRuleInternalSuffix)
 	if err != nil {
 		return fmt.Errorf("error deleting firewall rule for internal cluster traffic: %v", err)
 	}
-	err = gce.deleteFirewallRule(cluster, cluster.Name+firewallRuleApiSuffix)
+	err = gce.deleteFirewallRule(ctx, cluster, cluster.Name+firewallRuleApiSuffix)
 	if err != nil {
 		return fmt.Errorf("error deleting firewall rule for core api server traffic: %v", err)
 	}
@@ -118,7 +121,7 @@ func getOrNewComputeServiceForCluster(params ClusterActuatorParams) (GCEClientCo
 	return computeService, nil
 }
 
-func (gce *GCEClusterClient) createFirewallRuleIfNotExists(cluster *clusterv1.Cluster, firewallRule *compute.Firewall) error {
+func (gce *GCEClusterClient) createFirewallRuleIfNotExists(ctx context.Context, cluster *clusterv1.Cluster, firewallRule *compute.Firewall) error {
 	ruleExists, ok := cluster.ObjectMeta.Annotations[firewallRuleAnnotationPrefix+firewallRule.Name]
 	if ok && ruleExists == "true" {
 		// The firewall rule was already created.
@@ -128,17 +131,17 @@ func (gce *GCEClusterClient) createFirewallRuleIfNotExists(cluster *clusterv1.Cl
 	if err != nil {
 		return fmt.Errorf("error parsing cluster provider spec: %v", err)
 	}
-	firewallRules, err := gce.computeService.FirewallsGet(clusterConfig.Project)
+	firewallRules, err := gce.computeService.FirewallsGet(ctx, clusterConfig.Project)
 	if err != nil {
 		return fmt.Errorf("error getting firewall rules: %v", err)
 	}
 
 	if !gce.containsFirewallRule(firewallRules, firewallRule.Name) {
-		op, err := gce.computeService.FirewallsInsert(clusterConfig.Project, firewallRule)
+		op, err := gce.computeService.FirewallsInsert(ctx, clusterConfig.Project, firewallRule)
 		if err != nil {
 			return fmt.Errorf("error creating firewall rule: %v", err)
 		}
-		err = gce.computeService.WaitForOperation(clusterConfig.Project, op)
+		err = gce.computeService.WaitForOperation(ctx, clusterConfig.Project, op)
 		if err != nil {
 			return fmt.Errorf("error waiting for firewall rule creation: %v", err)
 		}
@@ -163,17 +166,17 @@ func (gce *GCEClusterClient) containsFirewallRule(firewallRules *compute.Firewal
 	return false
 }
 
-func (gce *GCEClusterClient) deleteFirewallRule(cluster *clusterv1.Cluster, ruleName string) error {
+func (gce *GCEClusterClient) deleteFirewallRule(ctx context.Context, cluster *clusterv1.Cluster, ruleName string) error {
 	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
 	if err != nil {
 		return fmt.Errorf("error parsing cluster provider spec: %v", err)
 	}
-	op, err := gce.computeService.FirewallsDelete(clusterConfig.Project, ruleName)
+	op, err := gce.computeService.FirewallsDelete(ctx, clusterConfig.Project, ruleName)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("error deleting firewall rule: %v", err)
 	}
-	return gce.computeService.WaitForOperation(clusterConfig.Project, op)
+	return gce.computeService.WaitForOperation(ctx, clusterConfig.Project, op)
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package google_test
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -25,7 +26,6 @@ import (
 
 	"sigs.k8s.io/cluster-api/pkg/testcmdrunner"
 
-	"golang.org/x/net/context"
 	compute "google.golang.org/api/compute/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
@@ -271,7 +271,7 @@ func createCluster(t *testing.T, machine *v1alpha1.Machine, computeServiceMock *
 func newInsertInstanceCapturingMock() (*compute.Instance, *GCEClientComputeServiceMock) {
 	var receivedInstance compute.Instance
 	computeServiceMock := GCEClientComputeServiceMock{
-		mockInstancesInsert: func(project string, zone string, instance *compute.Instance) (*compute.Operation, error) {
+		mockInstancesInsert: func(_ context.Context, project, zone string, instance *compute.Instance) (*compute.Operation, error) {
 			receivedInstance = *instance
 			return &compute.Operation{
 				Status: "DONE",

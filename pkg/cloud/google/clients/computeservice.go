@@ -18,6 +18,7 @@ package clients
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,7 +26,7 @@ import (
 	"path"
 	"time"
 
-	"golang.org/x/net/context"
+	"github.com/golang/glog"
 	compute "google.golang.org/api/compute/v1"
 	"k8s.io/klog"
 )
@@ -65,67 +66,67 @@ func NewComputeServiceForURL(client *http.Client, baseURL string) (*ComputeServi
 }
 
 // A pass through wrapper for compute.Service.Images.Get(...)
-func (c *ComputeService) ImagesGet(project string, image string) (*compute.Image, error) {
-	return c.service.Images.Get(project, image).Do()
+func (c *ComputeService) ImagesGet(ctx context.Context, project, image string) (*compute.Image, error) {
+	return c.service.Images.Get(project, image).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.Images.GetFromFamily(...)
-func (c *ComputeService) ImagesGetFromFamily(project string, family string) (*compute.Image, error) {
-	return c.service.Images.GetFromFamily(project, family).Do()
+func (c *ComputeService) ImagesGetFromFamily(ctx context.Context, project, family string) (*compute.Image, error) {
+	return c.service.Images.GetFromFamily(project, family).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.Instances.Delete(...)
-func (c *ComputeService) InstancesDelete(project string, zone string, targetInstance string) (*compute.Operation, error) {
-	return c.service.Instances.Delete(project, zone, targetInstance).Do()
+func (c *ComputeService) InstancesDelete(ctx context.Context, project, zone, targetInstance string) (*compute.Operation, error) {
+	return c.service.Instances.Delete(project, zone, targetInstance).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.Instances.Get(...)
-func (c *ComputeService) InstancesGet(project string, zone string, instance string) (*compute.Instance, error) {
-	return c.service.Instances.Get(project, zone, instance).Do()
+func (c *ComputeService) InstancesGet(ctx context.Context, project, zone, instance string) (*compute.Instance, error) {
+	return c.service.Instances.Get(project, zone, instance).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.Instances.Insert(...)
-func (c *ComputeService) InstancesInsert(project string, zone string, instance *compute.Instance) (*compute.Operation, error) {
-	return c.service.Instances.Insert(project, zone, instance).Do()
+func (c *ComputeService) InstancesInsert(ctx context.Context, project, zone string, instance *compute.Instance) (*compute.Operation, error) {
+	return c.service.Instances.Insert(project, zone, instance).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.Instances.Insert(...)
-func (c *ComputeService) InstancesInsertFromTemplate(project string, zone string, instanceName string, instanceTemplate string) (*compute.Operation, error) {
+func (c *ComputeService) InstancesInsertFromTemplate(ctx context.Context, project, zone, instanceName, instanceTemplate string) (*compute.Operation, error) {
 	instanceTemplateUrl := fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/instanceTemplates/%s", project, instanceTemplate)
-	return c.service.Instances.Insert(project, zone, &compute.Instance{Name: instanceName}).SourceInstanceTemplate(instanceTemplateUrl).Do()
+	return c.service.Instances.Insert(project, zone, &compute.Instance{Name: instanceName}).SourceInstanceTemplate(instanceTemplateUrl).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.ZoneOperations.Get(...)
-func (c *ComputeService) ZoneOperationsGet(project string, zone string, operation string) (*compute.Operation, error) {
-	return c.service.ZoneOperations.Get(project, zone, operation).Do()
+func (c *ComputeService) ZoneOperationsGet(ctx context.Context, project, zone, operation string) (*compute.Operation, error) {
+	return c.service.ZoneOperations.Get(project, zone, operation).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.GlobalOperations.Get(...)
-func (c *ComputeService) GlobalOperationsGet(project string, operation string) (*compute.Operation, error) {
-	return c.service.GlobalOperations.Get(project, operation).Do()
+func (c *ComputeService) GlobalOperationsGet(ctx context.Context, project, operation string) (*compute.Operation, error) {
+	return c.service.GlobalOperations.Get(project, operation).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.Firewalls.List(...)
-func (c *ComputeService) FirewallsGet(project string) (*compute.FirewallList, error) {
-	return c.service.Firewalls.List(project).Do()
+func (c *ComputeService) FirewallsGet(ctx context.Context, project string) (*compute.FirewallList, error) {
+	return c.service.Firewalls.List(project).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.Firewalls.Insert(...)
-func (c *ComputeService) FirewallsInsert(project string, firewallRule *compute.Firewall) (*compute.Operation, error) {
-	return c.service.Firewalls.Insert(project, firewallRule).Do()
+func (c *ComputeService) FirewallsInsert(ctx context.Context, project string, firewallRule *compute.Firewall) (*compute.Operation, error) {
+	return c.service.Firewalls.Insert(project, firewallRule).Context(ctx).Do()
 }
 
 // A pass through wrapper for compute.Service.Firewalls.Delete(...)
-func (c *ComputeService) FirewallsDelete(project string, name string) (*compute.Operation, error) {
-	return c.service.Firewalls.Delete(project, name).Do()
+func (c *ComputeService) FirewallsDelete(ctx context.Context, project, name string) (*compute.Operation, error) {
+	return c.service.Firewalls.Delete(project, name).Context(ctx).Do()
 }
 
-func (c *ComputeService) WaitForOperation(project string, op *compute.Operation) error {
-	klog.Infof("Wait for %v %q...", op.OperationType, op.Name)
-	defer klog.Infof("Finish wait for %v %q...", op.OperationType, op.Name)
+func (c *ComputeService) WaitForOperation(ctx context.Context, project string, op *compute.Operation) error {
+	glog.Infof("Wait for %v %q...", op.OperationType, op.Name)
+	defer glog.Infof("Finish wait for %v %q...", op.OperationType, op.Name)
 
 	start := time.Now()
-	ctx, cf := context.WithTimeout(context.Background(), gceTimeout)
+	ctx, cf := context.WithTimeout(ctx, gceTimeout)
 	defer cf()
 
 	var err error
@@ -139,16 +140,16 @@ func (c *ComputeService) WaitForOperation(project string, op *compute.Operation)
 			return fmt.Errorf("gce operation %v %q timed out after %v", op.OperationType, op.Name, time.Since(start))
 		case <-time.After(gceWaitSleep):
 		}
-		op, err = c.getOp(project, op)
+		op, err = c.getOp(ctx, project, op)
 	}
 }
 
 // getOp returns an updated operation.
-func (c *ComputeService) getOp(project string, op *compute.Operation) (*compute.Operation, error) {
+func (c *ComputeService) getOp(ctx context.Context, project string, op *compute.Operation) (*compute.Operation, error) {
 	if op.Zone != "" {
-		return c.ZoneOperationsGet(project, path.Base(op.Zone), op.Name)
+		return c.ZoneOperationsGet(ctx, project, path.Base(op.Zone), op.Name)
 	} else {
-		return c.GlobalOperationsGet(project, op.Name)
+		return c.GlobalOperationsGet(ctx, project, op.Name)
 	}
 }
 

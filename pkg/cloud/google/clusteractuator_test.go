@@ -17,6 +17,7 @@ limitations under the License.
 package google_test
 
 import (
+	"context"
 	"testing"
 
 	compute "google.golang.org/api/compute/v1"
@@ -40,7 +41,7 @@ func aTestDelete(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			computeServiceMock := GCEClientComputeServiceMock{
-				mockFirewallsDelete: func(project string, name string) (*compute.Operation, error) {
+				mockFirewallsDelete: func(_ context.Context, project, name string) (*compute.Operation, error) {
 					return tc.firewallsDeleteOpResult, tc.firewallsDeleteErr
 				},
 			}

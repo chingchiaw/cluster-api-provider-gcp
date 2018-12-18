@@ -23,9 +23,11 @@ import (
 
 	compute "google.golang.org/api/compute/v1"
 	"sigs.k8s.io/cluster-api-provider-gcp/pkg/cloud/google/clients"
+	"sigs.k8s.io/cluster-api/bazel-cluster-api/external/go_sdk/src/context"
 )
 
 func TestImagesGet(t *testing.T) {
+	ctx := context.Background()
 	mux, server, client := createMuxServerAndComputeClient(t)
 	defer server.Close()
 	responseImage := compute.Image{
@@ -33,7 +35,7 @@ func TestImagesGet(t *testing.T) {
 		ArchiveSizeBytes: 544,
 	}
 	mux.Handle("/compute/v1/projects/projectName/global/images/imageName", handler(nil, &responseImage))
-	image, err := client.ImagesGet("projectName", "imageName")
+	image, err := client.ImagesGet(ctx, "projectName", "imageName")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -49,6 +51,7 @@ func TestImagesGet(t *testing.T) {
 }
 
 func TestImagesGetFromFamily(t *testing.T) {
+	ctx := context.Background()
 	mux, server, client := createMuxServerAndComputeClient(t)
 	defer server.Close()
 	responseImage := compute.Image{
@@ -56,7 +59,7 @@ func TestImagesGetFromFamily(t *testing.T) {
 		ArchiveSizeBytes: 544,
 	}
 	mux.Handle("/compute/v1/projects/projectName/global/images/family/familyName", handler(nil, &responseImage))
-	image, err := client.ImagesGetFromFamily("projectName", "familyName")
+	image, err := client.ImagesGetFromFamily(ctx, "projectName", "familyName")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -72,13 +75,14 @@ func TestImagesGetFromFamily(t *testing.T) {
 }
 
 func TestInstancesDelete(t *testing.T) {
+	ctx := context.Background()
 	mux, server, client := createMuxServerAndComputeClient(t)
 	defer server.Close()
 	responseOperation := compute.Operation{
 		Id: 4501,
 	}
 	mux.Handle("/compute/v1/projects/projectName/zones/zoneName/instances/instanceName", handler(nil, &responseOperation))
-	op, err := client.InstancesDelete("projectName", "zoneName", "instanceName")
+	op, err := client.InstancesDelete(ctx, "projectName", "zoneName", "instanceName")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -91,6 +95,7 @@ func TestInstancesDelete(t *testing.T) {
 }
 
 func TestInstancesGet(t *testing.T) {
+	ctx := context.Background()
 	mux, server, client := createMuxServerAndComputeClient(t)
 	defer server.Close()
 	responseInstance := compute.Instance{
@@ -98,7 +103,7 @@ func TestInstancesGet(t *testing.T) {
 		Zone: "zoneName",
 	}
 	mux.Handle("/compute/v1/projects/projectName/zones/zoneName/instances/instanceName", handler(nil, &responseInstance))
-	instance, err := client.InstancesGet("projectName", "zoneName", "instanceName")
+	instance, err := client.InstancesGet(ctx, "projectName", "zoneName", "instanceName")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -114,13 +119,14 @@ func TestInstancesGet(t *testing.T) {
 }
 
 func TestInstancesInsert(t *testing.T) {
+	ctx := context.Background()
 	mux, server, client := createMuxServerAndComputeClient(t)
 	defer server.Close()
 	responseOperation := compute.Operation{
 		Id: 3001,
 	}
 	mux.Handle("/compute/v1/projects/projectName/zones/zoneName/instances", handler(nil, &responseOperation))
-	op, err := client.InstancesInsert("projectName", "zoneName", nil)
+	op, err := client.InstancesInsert(ctx, "projectName", "zoneName", nil)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -133,19 +139,21 @@ func TestInstancesInsert(t *testing.T) {
 }
 
 func TestWaitForOperationSuccess(t *testing.T) {
+	ctx := context.Background()
 	_, server, client := createMuxServerAndComputeClient(t)
 	defer server.Close()
 	op := &compute.Operation{
 		Id:     3001,
 		Status: "DONE",
 	}
-	err := client.WaitForOperation("projectName", op)
+	err := client.WaitForOperation(ctx, "projectName", op)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestWaitForOperationError(t *testing.T) {
+	ctx := context.Background()
 	_, server, client := createMuxServerAndComputeClient(t)
 	defer server.Close()
 	responseError := &compute.OperationErrorErrors{
@@ -159,7 +167,7 @@ func TestWaitForOperationError(t *testing.T) {
 			Errors: responseErrors,
 		},
 	}
-	err := client.WaitForOperation("projectName", op)
+	err := client.WaitForOperation(ctx, "projectName", op)
 	if err == nil || err.Error() != responseError.Message+"\n" {
 		t.Errorf("expected error to occur: %v", responseError.Message)
 	}
