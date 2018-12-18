@@ -17,6 +17,7 @@ limitations under the License.
 package google
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -29,7 +30,6 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	compute "google.golang.org/api/compute/v1"
@@ -236,7 +236,7 @@ func (gce *GCEClient) ProvisionClusterDependencies(cluster *clusterv1.Cluster) e
 	return gce.serviceAccountService.CreateMasterNodeServiceAccount(cluster)
 }
 
-func (gce *GCEClient) Create(_ context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
+func (gce *GCEClient) Create(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
 	if gce.machineSetupConfigGetter == nil {
 		return errors.New("a valid machineSetupConfigGetter is required")
 	}
@@ -250,12 +250,10 @@ func (gce *GCEClient) Create(_ context.Context, cluster *clusterv1.Cluster, mach
 		return gce.handleMachineError(machine, apierrors.InvalidMachineConfiguration(
 			"Cannot unmarshal cluster's providerSpec field: %v", err), createEventAction)
 	}
-
-	if verr := gce.validateMachine(machine, machineConfig); verr != nil {
-		return gce.handleMachineError(machine, verr, createEventAction)
+	if err := gce.validateMachine(machine, machineConfig); err != nil {
+		return gce.handleMachineError(machine, err, createEventAction)
 	}
-
-	instance, err := gce.instanceIfExists(cluster, machine)
+	instance, err := gce.instanceIfExists(ctx, cluster, machine)
 	if err != nil {
 		return err
 	}
@@ -267,12 +265,12 @@ func (gce *GCEClient) Create(_ context.Context, cluster *clusterv1.Cluster, mach
 
 	var op *compute.Operation
 	if machineConfig.InstanceTemplate != "" {
-		op, err = gce.createFromInstanceTemplate(cluster, clusterConfig, machine, machineConfig)
+		op, err = gce.createFromInstanceTemplate(ctx, cluster, clusterConfig, machine, machineConfig)
 	} else {
-		op, err = gce.create(cluster, clusterConfig, machine, machineConfig)
+		op, err = gce.create(ctx, cluster, clusterConfig, machine, machineConfig)
 	}
 	if err == nil {
-		err = gce.computeService.WaitForOperation(clusterConfig.Project, op)
+		err = gce.computeService.WaitForOperation(ctx, clusterConfig.Project, op)
 	}
 
 	if err != nil {
@@ -289,24 +287,17 @@ func (gce *GCEClient) Create(_ context.Context, cluster *clusterv1.Cluster, mach
 	return nil
 }
 
-func (gce *GCEClient) createFromInstanceTemplate(cluster *clusterv1.Cluster, clusterConfig *gceconfigv1.GCEClusterProviderConfig, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderConfig) (*compute.Operation, error) {
-	name := machine.ObjectMeta.Name
-	project := clusterConfig.Project
-	zone := machineConfig.Zone
-
-	return gce.computeService.InstancesInsertFromTemplate(project, zone, name, machineConfig.InstanceTemplate)
+func (gce *GCEClient) createFromInstanceTemplate(ctx context.Context, cluster *clusterv1.Cluster, clusterConfig *gceconfigv1.GCEClusterProviderSpec, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderSpec) (*compute.Operation, error) {
+	return gce.computeService.InstancesInsertFromTemplate(ctx, clusterConfig.Project, machineConfig.Zone, machine.Name, machineConfig.InstanceTemplate)
 }
 
-func (gce *GCEClient) create(cluster *clusterv1.Cluster, clusterConfig *gceconfigv1.GCEClusterProviderConfig, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderConfig) (*compute.Operation, error) {
-	name := machine.ObjectMeta.Name
-	project := clusterConfig.Project
-	zone := machineConfig.Zone
-
+func (gce *GCEClient) create(ctx context.Context, cluster *clusterv1.Cluster, clusterConfig *gceconfigv1.GCEClusterProviderSpec, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderSpec) (*compute.Operation, error) {
 	configParams := &machinesetup.ConfigParams{
 		OS:       machineConfig.OS,
 		Roles:    machineConfig.Roles,
 		Versions: machine.Spec.Versions,
 	}
+
 	machineSetupConfigs, err := gce.machineSetupConfigGetter.GetMachineSetupConfig()
 	if err != nil {
 		return nil, err
@@ -315,7 +306,7 @@ func (gce *GCEClient) create(cluster *clusterv1.Cluster, clusterConfig *gceconfi
 	if err != nil {
 		return nil, err
 	}
-	imagePath := gce.getImagePath(image)
+	imagePath := gce.getImagePath(ctx, image)
 	metadata, err := gce.getMetadata(cluster, machine, clusterConfig, configParams)
 	if err != nil {
 		return nil, err
@@ -326,9 +317,9 @@ func (gce *GCEClient) create(cluster *clusterv1.Cluster, clusterConfig *gceconfi
 		labels[BootstrapLabelKey] = "true"
 	}
 
-	return gce.computeService.InstancesInsert(project, zone, &compute.Instance{
-		Name:         name,
-		MachineType:  fmt.Sprintf("zones/%s/machineTypes/%s", zone, machineConfig.MachineType),
+	return gce.computeService.InstancesInsert(ctx, clusterConfig.Project, machineConfig.Zone, &compute.Instance{
+		Name:         machine.Name,
+		MachineType:  fmt.Sprintf("zones/%s/machineTypes/%s", machineConfig.Zone, machineConfig.MachineType),
 		CanIpForward: true,
 		NetworkInterfaces: []*compute.NetworkInterface{
 			{
@@ -341,7 +332,7 @@ func (gce *GCEClient) create(cluster *clusterv1.Cluster, clusterConfig *gceconfi
 				},
 			},
 		},
-		Disks:    newDisks(machineConfig, zone, imagePath, int64(30)),
+		Disks:    newDisks(machineConfig, machineConfig.Zone, imagePath, int64(30)),
 		Metadata: metadata,
 		Tags: &compute.Tags{
 			Items: []string{
@@ -360,8 +351,8 @@ func (gce *GCEClient) create(cluster *clusterv1.Cluster, clusterConfig *gceconfi
 	})
 }
 
-func (gce *GCEClient) Delete(_ context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
-	instance, err := gce.instanceIfExists(cluster, machine)
+func (gce *GCEClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
+	instance, err := gce.instanceIfExists(ctx, cluster, machine)
 	if err != nil {
 		return err
 	}
@@ -402,9 +393,9 @@ func (gce *GCEClient) Delete(_ context.Context, cluster *clusterv1.Cluster, mach
 		name = machine.ObjectMeta.Name
 	}
 
-	op, err := gce.computeService.InstancesDelete(project, zone, name)
+	op, err := gce.computeService.InstancesDelete(ctx, project, zone, name)
 	if err == nil {
-		err = gce.computeService.WaitForOperation(clusterConfig.Project, op)
+		err = gce.computeService.WaitForOperation(ctx, clusterConfig.Project, op)
 	}
 	if err != nil {
 		return gce.handleMachineError(machine, apierrors.DeleteMachine(
@@ -473,7 +464,7 @@ func (gce *GCEClient) Update(ctx context.Context, cluster *clusterv1.Cluster, go
 
 	currentMachine := (*clusterv1.Machine)(status)
 	if currentMachine == nil {
-		instance, err := gce.instanceIfExists(cluster, goalMachine)
+		instance, err := gce.instanceIfExists(ctx, cluster, goalMachine)
 		if err != nil {
 			return err
 		}
@@ -520,8 +511,8 @@ func (gce *GCEClient) Update(ctx context.Context, cluster *clusterv1.Cluster, go
 	return gce.updateInstanceStatus(goalMachine)
 }
 
-func (gce *GCEClient) Exists(_ context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) (bool, error) {
-	i, err := gce.instanceIfExists(cluster, machine)
+func (gce *GCEClient) Exists(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) (bool, error) {
+	i, err := gce.instanceIfExists(ctx, cluster, machine)
 	if err != nil {
 		return false, err
 	}
@@ -539,7 +530,7 @@ func (gce *GCEClient) GetIP(cluster *clusterv1.Cluster, machine *clusterv1.Machi
 		return "", err
 	}
 
-	instance, err := gce.computeService.InstancesGet(clusterConfig.Project, machineConfig.Zone, machine.ObjectMeta.Name)
+	instance, err := gce.computeService.InstancesGet(context.TODO(), clusterConfig.Project, machineConfig.Zone, machine.ObjectMeta.Name)
 	if err != nil {
 		return "", err
 	}
@@ -621,7 +612,7 @@ func (gce *GCEClient) requiresUpdate(a *clusterv1.Machine, b *clusterv1.Machine)
 }
 
 // Gets the instance represented by the given machine
-func (gce *GCEClient) instanceIfExists(cluster *clusterv1.Cluster, machine *clusterv1.Machine) (*compute.Instance, error) {
+func (gce *GCEClient) instanceIfExists(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) (*compute.Instance, error) {
 	identifyingMachine := machine
 
 	// Try to use the last saved status locating the machine
@@ -646,7 +637,7 @@ func (gce *GCEClient) instanceIfExists(cluster *clusterv1.Cluster, machine *clus
 		return nil, err
 	}
 
-	instance, err := gce.computeService.InstancesGet(clusterConfig.Project, machineConfig.Zone, identifyingMachine.ObjectMeta.Name)
+	instance, err := gce.computeService.InstancesGet(ctx, clusterConfig.Project, machineConfig.Zone, identifyingMachine.ObjectMeta.Name)
 	if err != nil {
 		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
 			return nil, nil
@@ -746,7 +737,7 @@ func (gce *GCEClient) handleMachineError(machine *clusterv1.Machine, err *apierr
 	return err
 }
 
-func (gce *GCEClient) getImagePath(img string) (imagePath string) {
+func (gce *GCEClient) getImagePath(ctx context.Context, img string) (imagePath string) {
 	defaultImg := "projects/ubuntu-os-cloud/global/images/family/ubuntu-1604-lts"
 
 	// A full image path must match the regex format. If it doesn't, we will fall back to a default base image.
@@ -756,9 +747,9 @@ func (gce *GCEClient) getImagePath(img string) (imagePath string) {
 		project, family, name := matches[1], matches[2], matches[3]
 		var err error
 		if family == "" {
-			_, err = gce.computeService.ImagesGet(project, name)
+			_, err = gce.computeService.ImagesGet(ctx, project, name)
 		} else {
-			_, err = gce.computeService.ImagesGetFromFamily(project, name)
+			_, err = gce.computeService.ImagesGetFromFamily(ctx, project, name)
 		}
 
 		if err == nil {
