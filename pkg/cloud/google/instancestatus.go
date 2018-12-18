@@ -53,7 +53,7 @@ func (gce *GCEClient) instanceStatus(machine *clusterv1.Machine) (instanceStatus
 }
 
 // Sets the status of the instance identified by the given machine to the given machine
-func (gce *GCEClient) updateInstanceStatus(machine *clusterv1.Machine) error {
+func (gce *GCEClient) updateInstanceStatus(ctx context.Context, machine *clusterv1.Machine) error {
 	if gce.client == nil {
 		return nil
 	}
@@ -73,7 +73,7 @@ func (gce *GCEClient) updateInstanceStatus(machine *clusterv1.Machine) error {
 		return err
 	}
 
-	return gce.client.Update(context.Background(), m)
+	return gce.client.Update(ctx, m)
 }
 
 // Gets the state of the instance stored on the given machine CRD

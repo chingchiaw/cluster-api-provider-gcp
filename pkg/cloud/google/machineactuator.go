@@ -236,19 +236,12 @@ func (gce *GCEClient) ProvisionClusterDependencies(cluster *clusterv1.Cluster) e
 }
 
 func (gce *GCEClient) Create(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
-	if gce.machineSetupConfigGetter == nil {
-		return errors.New("a valid machineSetupConfigGetter is required")
-	}
 	machineConfig, err := machineProviderFromProviderSpec(machine.Spec.ProviderSpec)
 	if err != nil {
 		return gce.handleMachineError(machine, apierrors.InvalidMachineConfiguration(
 			"Cannot unmarshal machine's providerSpec field: %v", err), createEventAction)
 	}
-	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
-	if err != nil {
-		return gce.handleMachineError(machine, apierrors.InvalidMachineConfiguration(
-			"Cannot unmarshal cluster's providerSpec field: %v", err), createEventAction)
-	}
+
 	if err := gce.validateMachine(machine, machineConfig); err != nil {
 		return gce.handleMachineError(machine, err, createEventAction)
 	}
@@ -264,12 +257,12 @@ func (gce *GCEClient) Create(ctx context.Context, cluster *clusterv1.Cluster, ma
 
 	var op *compute.Operation
 	if machineConfig.InstanceTemplate != "" {
-		op, err = gce.createFromInstanceTemplate(ctx, cluster, clusterConfig, machine, machineConfig)
+		op, err = gce.createFromInstanceTemplate(ctx, cluster, machine, machineConfig)
 	} else {
-		op, err = gce.create(ctx, cluster, clusterConfig, machine, machineConfig)
+		op, err = gce.create(ctx, cluster, machine, machineConfig)
 	}
 	if err == nil {
-		err = gce.computeService.WaitForOperation(ctx, clusterConfig.Project, op)
+		err = gce.computeService.WaitForOperation(ctx, machineConfig.Project, op)
 	}
 
 	if err != nil {
@@ -281,16 +274,24 @@ func (gce *GCEClient) Create(ctx context.Context, cluster *clusterv1.Cluster, ma
 	// If we have a v1Alpha1Client, then annotate the machine so that we
 	// remember exactly what VM we created for it.
 	if gce.client != nil {
-		return gce.updateAnnotations(cluster, machine)
+		return gce.updateAnnotations(ctx, cluster, machine)
 	}
 	return nil
 }
 
-func (gce *GCEClient) createFromInstanceTemplate(ctx context.Context, cluster *clusterv1.Cluster, clusterConfig *gceconfigv1.GCEClusterProviderSpec, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderSpec) (*compute.Operation, error) {
-	return gce.computeService.InstancesInsertFromTemplate(ctx, clusterConfig.Project, machineConfig.Zone, machine.Name, machineConfig.InstanceTemplate)
+func (gce *GCEClient) createFromInstanceTemplate(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderSpec) (*compute.Operation, error) {
+	return gce.computeService.InstancesInsertFromTemplate(ctx, machineConfig.Project, machineConfig.Zone, machine.Name, machineConfig.InstanceTemplate)
 }
 
-func (gce *GCEClient) create(ctx context.Context, cluster *clusterv1.Cluster, clusterConfig *gceconfigv1.GCEClusterProviderSpec, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderSpec) (*compute.Operation, error) {
+func (gce *GCEClient) create(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderSpec) (*compute.Operation, error) {
+	if gce.machineSetupConfigGetter == nil {
+		return nil, errors.New("a valid machineSetupConfigGetter is required")
+	}
+	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
+	if err != nil {
+		return nil, gce.handleMachineError(machine, apierrors.InvalidMachineConfiguration(
+			"Cannot unmarshal cluster's providerSpec field: %v", err), createEventAction)
+	}
 	configParams := &machinesetup.ConfigParams{
 		OS:       machineConfig.OS,
 		Roles:    machineConfig.Roles,
@@ -306,7 +307,7 @@ func (gce *GCEClient) create(ctx context.Context, cluster *clusterv1.Cluster, cl
 		return nil, err
 	}
 	imagePath := gce.getImagePath(ctx, image)
-	metadata, err := gce.getMetadata(cluster, machine, clusterConfig, configParams)
+	metadata, err := gce.getMetadata(cluster, clusterConfig, machine, machineConfig, configParams)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +317,7 @@ func (gce *GCEClient) create(ctx context.Context, cluster *clusterv1.Cluster, cl
 		labels[BootstrapLabelKey] = "true"
 	}
 
-	return gce.computeService.InstancesInsert(ctx, clusterConfig.Project, machineConfig.Zone, &compute.Instance{
+	return gce.computeService.InstancesInsert(ctx, machineConfig.Project, machineConfig.Zone, &compute.Instance{
 		Name:         machine.Name,
 		MachineType:  fmt.Sprintf("zones/%s/machineTypes/%s", machineConfig.Zone, machineConfig.MachineType),
 		CanIpForward: true,
@@ -386,15 +387,8 @@ func (gce *GCEClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, ma
 		return gce.handleMachineError(machine,
 			apierrors.InvalidMachineConfiguration("Cannot unmarshal machine's providerSpec field: %v", err), deleteEventAction)
 	}
-
-	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
-	if err != nil {
-		return gce.handleMachineError(machine,
-			apierrors.InvalidMachineConfiguration("Cannot unmarshal cluster's providerSpec field: %v", err), deleteEventAction)
-	}
-
-	if verr := gce.validateMachine(machine, machineConfig); verr != nil {
-		return gce.handleMachineError(machine, verr, deleteEventAction)
+	if err := gce.validateMachine(machine, machineConfig); err != nil {
+		return gce.handleMachineError(machine, err, deleteEventAction)
 	}
 
 	var project, zone, name string
@@ -407,14 +401,14 @@ func (gce *GCEClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, ma
 
 	// If the annotations are missing, fall back on providerSpec
 	if project == "" || zone == "" || name == "" {
-		project = clusterConfig.Project
+		project = machineConfig.Project
 		zone = machineConfig.Zone
 		name = machine.ObjectMeta.Name
 	}
 
 	op, err := gce.computeService.InstancesDelete(ctx, project, zone, name)
 	if err == nil {
-		err = gce.computeService.WaitForOperation(ctx, clusterConfig.Project, op)
+		err = gce.computeService.WaitForOperation(ctx, project, op)
 	}
 	if err != nil {
 		return gce.handleMachineError(machine, apierrors.DeleteMachine(
@@ -424,29 +418,6 @@ func (gce *GCEClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, ma
 	gce.eventRecorder.Eventf(machine, corev1.EventTypeNormal, "Deleted", "Deleted Machine %v", name)
 
 	return err
-}
-
-func (gce *GCEClient) PostCreate(cluster *clusterv1.Cluster) error {
-	err := CreateDefaultStorageClass()
-	if err != nil {
-		return fmt.Errorf("error creating default storage class: %v", err)
-	}
-
-	err = gce.serviceAccountService.CreateIngressControllerServiceAccount(cluster)
-	if err != nil {
-		return fmt.Errorf("error creating service account for ingress controller: %v", err)
-	}
-
-	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
-	if err != nil {
-		return fmt.Errorf("Cannot unmarshal cluster's providerSpec field: %v", err)
-	}
-	err = CreateIngressController(clusterConfig.Project, cluster.Name)
-	if err != nil {
-		return fmt.Errorf("error creating ingress controller: %v", err)
-	}
-
-	return nil
 }
 
 func (gce *GCEClient) PostDelete(cluster *clusterv1.Cluster) error {
@@ -488,8 +459,8 @@ func (gce *GCEClient) Update(ctx context.Context, cluster *clusterv1.Cluster, go
 			return err
 		}
 		if instance != nil && instance.Labels[BootstrapLabelKey] != "" {
-			klog.Infof("Populating current state for bootstrap machine %v", goalMachine.ObjectMeta.Name)
-			return gce.updateAnnotations(cluster, goalMachine)
+			glog.Infof("Populating current state for bootstrap machine %v", goalMachine.ObjectMeta.Name)
+			return gce.updateAnnotations(ctx, cluster, goalMachine)
 		} else {
 			return fmt.Errorf("Cannot retrieve current state to update machine %v", goalMachine.ObjectMeta.Name)
 		}
@@ -527,7 +498,7 @@ func (gce *GCEClient) Update(ctx context.Context, cluster *clusterv1.Cluster, go
 	if err != nil {
 		return err
 	}
-	return gce.updateInstanceStatus(goalMachine)
+	return gce.updateInstanceStatus(ctx, goalMachine)
 }
 
 func (gce *GCEClient) Exists(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) (bool, error) {
@@ -543,13 +514,7 @@ func (gce *GCEClient) GetIP(cluster *clusterv1.Cluster, machine *clusterv1.Machi
 	if err != nil {
 		return "", err
 	}
-
-	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
-	if err != nil {
-		return "", err
-	}
-
-	instance, err := gce.computeService.InstancesGet(context.TODO(), clusterConfig.Project, machineConfig.Zone, machine.ObjectMeta.Name)
+	instance, err := gce.computeService.InstancesGet(context.TODO(), machineConfig.Project, machineConfig.Zone, machine.ObjectMeta.Name)
 	if err != nil {
 		return "", err
 	}
@@ -572,14 +537,9 @@ func (gce *GCEClient) GetKubeConfig(cluster *clusterv1.Cluster, master *clusterv
 		return "", err
 	}
 
-	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
-	if err != nil {
-		return "", err
-	}
-
 	command := "sudo cat /etc/kubernetes/admin.conf"
 	result := strings.TrimSpace(util.ExecCommand(
-		"gcloud", "compute", "ssh", "--project", clusterConfig.Project,
+		"gcloud", "compute", "ssh", "--project", machineConfig.Project,
 		"--zone", machineConfig.Zone, master.ObjectMeta.Name, "--command", command, "--", "-q"))
 	return result, nil
 }
@@ -593,7 +553,7 @@ func isMaster(roles []gceconfigv1.MachineRole) bool {
 	return false
 }
 
-func (gce *GCEClient) updateAnnotations(cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
+func (gce *GCEClient) updateAnnotations(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
 	machineConfig, err := machineProviderFromProviderSpec(machine.Spec.ProviderSpec)
 	name := machine.ObjectMeta.Name
 	zone := machineConfig.Zone
@@ -601,24 +561,16 @@ func (gce *GCEClient) updateAnnotations(cluster *clusterv1.Cluster, machine *clu
 		return gce.handleMachineError(machine,
 			apierrors.InvalidMachineConfiguration("Cannot unmarshal machine's providerSpec field: %v", err), noEventAction)
 	}
-
-	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
-	project := clusterConfig.Project
-	if err != nil {
-		return gce.handleMachineError(machine,
-			apierrors.InvalidMachineConfiguration("Cannot unmarshal cluster's providerSpec field: %v", err), noEventAction)
-	}
-
 	if machine.ObjectMeta.Annotations == nil {
 		machine.ObjectMeta.Annotations = make(map[string]string)
 	}
-	machine.ObjectMeta.Annotations[ProjectAnnotationKey] = project
+	machine.ObjectMeta.Annotations[ProjectAnnotationKey] = machineConfig.Project
 	machine.ObjectMeta.Annotations[ZoneAnnotationKey] = zone
 	machine.ObjectMeta.Annotations[NameAnnotationKey] = name
-	if err := gce.client.Update(context.Background(), machine); err != nil {
+	if err := gce.client.Update(ctx, machine); err != nil {
 		return err
 	}
-	return gce.updateInstanceStatus(machine)
+	return gce.updateInstanceStatus(ctx, machine)
 }
 
 // The two machines differ in a way that requires an update
@@ -651,12 +603,7 @@ func (gce *GCEClient) instanceIfExists(ctx context.Context, cluster *clusterv1.C
 		return nil, err
 	}
 
-	clusterConfig, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
-	if err != nil {
-		return nil, err
-	}
-
-	instance, err := gce.computeService.InstancesGet(ctx, clusterConfig.Project, machineConfig.Zone, identifyingMachine.ObjectMeta.Name)
+	instance, err := gce.computeService.InstancesGet(ctx, machineConfig.Project, machineConfig.Zone, identifyingMachine.ObjectMeta.Name)
 	if err != nil {
 		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
 			return nil, nil
@@ -666,12 +613,6 @@ func (gce *GCEClient) instanceIfExists(ctx context.Context, cluster *clusterv1.C
 
 	return instance, nil
 }
-
-/*
-func (gce *GCEClient) machineproviderconfig(providerSpec clusterv1.ProviderSpec) (*gceconfigv1.GCEMachineProviderSpec, error) {
-	return machineProviderFromProviderSpec(providerSpec)
-}
-*/
 
 func (gce *GCEClient) updateMasterInplace(cluster *clusterv1.Cluster, oldMachine *clusterv1.Machine, newMachine *clusterv1.Machine) error {
 	if oldMachine.Spec.Versions.ControlPlane != newMachine.Spec.Versions.ControlPlane {
@@ -880,7 +821,7 @@ func clientWithAltTokenSource(gceConfigPath string) (*http.Client, error) {
 	return client, nil
 }
 
-func (gce *GCEClient) getMetadata(cluster *clusterv1.Cluster, machine *clusterv1.Machine, clusterConfig *gceconfigv1.GCEClusterProviderSpec, configParams *machinesetup.ConfigParams) (*compute.Metadata, error) {
+func (gce *GCEClient) getMetadata(cluster *clusterv1.Cluster, clusterConfig *gceconfigv1.GCEClusterProviderSpec, machine *clusterv1.Machine, machineConfig *gceconfigv1.GCEMachineProviderSpec, configParams *machinesetup.ConfigParams) (*compute.Metadata, error) {
 	var metadataMap map[string]string
 	if machine.Spec.Versions.Kubelet == "" {
 		return nil, errors.New("invalid master configuration: missing Machine.Spec.Versions.Kubelet")
@@ -914,7 +855,7 @@ func (gce *GCEClient) getMetadata(cluster *clusterv1.Cluster, machine *clusterv1
 		if err != nil {
 			return nil, err
 		}
-		metadataMap, err = nodeMetadata(kubeadmToken, cluster, machine, clusterConfig.Project, &machineSetupMetadata)
+		metadataMap, err = nodeMetadata(kubeadmToken, cluster, machine, machineConfig.Project, &machineSetupMetadata)
 		if err != nil {
 			return nil, err
 		}

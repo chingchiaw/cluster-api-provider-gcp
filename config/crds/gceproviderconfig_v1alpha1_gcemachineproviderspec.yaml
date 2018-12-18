@@ -51,6 +51,8 @@ spec:
         os:
           description: The name of the OS to be installed on the machine.
           type: string
+        project:
+          type: string
         roles:
           items:
             type: string
@@ -58,6 +60,7 @@ spec:
         zone:
           type: string
       required:
+      - project
       - zone
   version: v1alpha1
 status:
