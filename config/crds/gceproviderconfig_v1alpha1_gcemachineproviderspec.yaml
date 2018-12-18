@@ -44,6 +44,8 @@ spec:
           type: object
         os:
           type: string
+        project:
+          type: string
         roles:
           items:
             type: string
@@ -51,6 +53,7 @@ spec:
         zone:
           type: string
       required:
+      - project
       - zone
   version: v1alpha1
 status:
