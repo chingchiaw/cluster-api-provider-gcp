@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// Setup all Controllers
-	if err := controller.AddToManager(mgr); err != nil {
+	if err := controller.AddToManagerWithMachineSet(mgr); err != nil {
 		log.Fatal(err)
 	}
 
@@ -93,6 +93,13 @@ func initStaticDeps(mgr manager.Manager) {
 		Scheme:                   mgr.GetScheme(),
 		CloudConfigPath:          *cloudConfig,
 	})
+	if err == nil {
+		google.MachineSetActuator, err = google.NewMachineSetActuator(google.MachineSetActuatorParams{
+			EventRecorder:   mgr.GetRecorder("gce-controller"),
+			Client:          mgr.GetClient(),
+			CloudConfigPath: *cloudConfig,
+		})
+	}
 	if err != nil {
 		klog.Fatalf("Error creating cluster provisioner for google : %v", err)
 	}

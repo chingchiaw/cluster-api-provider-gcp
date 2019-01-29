@@ -121,27 +121,27 @@ func (c *ComputeService) FirewallsDelete(ctx context.Context, project, name stri
 	return c.service.Firewalls.Delete(project, name).Context(ctx).Do()
 }
 
-func (c *ComputeService) InstanceGroupManagersGet(project, zone, igm string) (*compute.InstanceGroupManager, error) {
-	return c.service.InstanceGroupManagers.Get(project, zone, igm).Do()
+func (c *ComputeService) InstanceGroupManagersGet(ctx context.Context, project, zone, igm string) (*compute.InstanceGroupManager, error) {
+	return c.service.InstanceGroupManagers.Get(project, zone, igm).Context(ctx).Do()
 }
 
-func (c *ComputeService) InstanceGroupManagersInsert(project, zone string, igm *compute.InstanceGroupManager) (*compute.Operation, error) {
-	return c.service.InstanceGroupManagers.Insert(project, zone, igm).Do()
+func (c *ComputeService) InstanceGroupManagersInsert(ctx context.Context, project, zone string, igm *compute.InstanceGroupManager) (*compute.Operation, error) {
+	return c.service.InstanceGroupManagers.Insert(project, zone, igm).Context(ctx).Do()
 }
 
-func (c *ComputeService) InstanceGroupManagersDelete(project, zone, igm string) (*compute.Operation, error) {
-	return c.service.InstanceGroupManagers.Delete(project, zone, igm).Do()
+func (c *ComputeService) InstanceGroupManagersDelete(ctx context.Context, project, zone, igm string) (*compute.Operation, error) {
+	return c.service.InstanceGroupManagers.Delete(project, zone, igm).Context(ctx).Do()
 }
 
-func (c *ComputeService) InstanceGroupManagersResize(project, zone, igm string, size int64) (*compute.Operation, error) {
-	return c.service.InstanceGroupManagers.Resize(project, zone, igm, size).Do()
+func (c *ComputeService) InstanceGroupManagersResize(ctx context.Context, project, zone, igm string, size int64) (*compute.Operation, error) {
+	return c.service.InstanceGroupManagers.Resize(project, zone, igm, size).Context(ctx).Do()
 }
 
-func (c *ComputeService) InstanceGroupManagersListInstances(project, zone, igm string) (*compute.InstanceGroupManagersListManagedInstancesResponse, error) {
-	return c.service.InstanceGroupManagers.ListManagedInstances(project, zone, igm).Do()
+func (c *ComputeService) InstanceGroupManagersListInstances(ctx context.Context, project, zone, igm string) (*compute.InstanceGroupManagersListManagedInstancesResponse, error) {
+	return c.service.InstanceGroupManagers.ListManagedInstances(project, zone, igm).Context(ctx).Do()
 }
 
-func (c *ComputeService) WaitForOperation(project string, op *compute.Operation) error {
+func (c *ComputeService) WaitForOperation(ctx context.Context, project string, op *compute.Operation) error {
 	glog.Infof("Wait for %v %q...", op.OperationType, op.Name)
 	defer glog.Infof("Finish wait for %v %q...", op.OperationType, op.Name)
 
