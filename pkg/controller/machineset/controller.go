@@ -269,12 +269,12 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1alp
 		return err
 	}
 
-	if err := c.actuator.Resize(cluster, ms); err != nil {
+	if err := c.actuator.Resize(ctx, cluster, ms); err != nil {
 		glog.Errorf("Error resizing machine set %v", ms.Name)
 		return nil
 	}
 
-	vms, err := c.actuator.ListMachines(cluster, ms)
+	vms, err := c.actuator.ListMachines(ctx, cluster, ms)
 	if err != nil {
 		glog.Errorf("Error listing machines for machine set %v after resize", ms.Name)
 		return err
@@ -470,5 +470,5 @@ func (c *ReconcileMachineSet) delete(ctx context.Context, ms *clusterv1alpha1.Ma
 		return err
 	}
 
-	return c.actuator.Delete(cluster, ms)
+	return c.actuator.Delete(ctx, cluster, ms)
 }

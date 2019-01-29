@@ -17,6 +17,7 @@ limitations under the License.
 package google
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -60,7 +61,7 @@ func NewMachineSetActuator(params MachineSetActuatorParams) (*GCEMachineSetClien
 	}, nil
 }
 
-func (gce *GCEMachineSetClient) igmIfExists(cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) (*compute.InstanceGroupManager, error) {
+func (gce *GCEMachineSetClient) igmIfExists(ctx context.Context, cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) (*compute.InstanceGroupManager, error) {
 	machineSpec, err := machineProviderFromProviderSpec(machineSet.Spec.Template.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
@@ -73,7 +74,7 @@ func (gce *GCEMachineSetClient) igmIfExists(cluster *clusterv1.Cluster, machineS
 		return nil, gce.handleMachineSetError(machineSet, err)
 	}
 
-	igm, err := gce.computeService.InstanceGroupManagersGet(clusterSpec.Project, machineSpec.Zone, machineSet.ObjectMeta.Name)
+	igm, err := gce.computeService.InstanceGroupManagersGet(ctx, clusterSpec.Project, machineSpec.Zone, machineSet.ObjectMeta.Name)
 	if err != nil {
 		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
 			return nil, nil
@@ -83,8 +84,8 @@ func (gce *GCEMachineSetClient) igmIfExists(cluster *clusterv1.Cluster, machineS
 	return igm, nil
 }
 
-func (gce *GCEMachineSetClient) create(cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) error {
-	igm, err := gce.igmIfExists(cluster, machineSet)
+func (gce *GCEMachineSetClient) create(ctx context.Context, cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) error {
+	igm, err := gce.igmIfExists(ctx, cluster, machineSet)
 	if err != nil {
 		return err
 	}
@@ -112,13 +113,13 @@ func (gce *GCEMachineSetClient) create(cluster *clusterv1.Cluster, machineSet *c
 		return gce.handleMachineSetError(machineSet, err)
 	}
 
-	op, err := gce.computeService.InstanceGroupManagersInsert(clusterSpec.Project, machineSpec.Zone, &compute.InstanceGroupManager{
+	op, err := gce.computeService.InstanceGroupManagersInsert(ctx, clusterSpec.Project, machineSpec.Zone, &compute.InstanceGroupManager{
 		InstanceTemplate: fmt.Sprintf("global/instanceTemplates/%s", templateName),
 		Name:             machineSet.ObjectMeta.Name,
 		TargetSize:       int64(*machineSet.Spec.Replicas),
 	})
 	if err == nil {
-		err = gce.computeService.WaitForOperation(clusterSpec.Project, op)
+		err = gce.computeService.WaitForOperation(ctx, clusterSpec.Project, op)
 	}
 	if err != nil {
 		return gce.handleMachineSetError(machineSet, err)
@@ -141,8 +142,8 @@ func (gce *GCEMachineSetClient) handleMachineSetError(machineSet *clusterv1.Mach
 	return err
 }
 
-func (gce *GCEMachineSetClient) Delete(cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) error {
-	igm, err := gce.igmIfExists(cluster, machineSet)
+func (gce *GCEMachineSetClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) error {
+	igm, err := gce.igmIfExists(ctx, cluster, machineSet)
 	if err != nil {
 		return err
 	}
@@ -164,9 +165,9 @@ func (gce *GCEMachineSetClient) Delete(cluster *clusterv1.Cluster, machineSet *c
 		return gce.handleMachineSetError(machineSet, err)
 	}
 
-	op, err := gce.computeService.InstanceGroupManagersDelete(clusterSpec.Project, machineSpec.Zone, machineSet.Name)
+	op, err := gce.computeService.InstanceGroupManagersDelete(ctx, clusterSpec.Project, machineSpec.Zone, machineSet.Name)
 	if err == nil {
-		err = gce.computeService.WaitForOperation(clusterSpec.Project, op)
+		err = gce.computeService.WaitForOperation(ctx, clusterSpec.Project, op)
 	}
 	if err != nil {
 		return gce.handleMachineSetError(machineSet, err)
@@ -177,14 +178,14 @@ func (gce *GCEMachineSetClient) Delete(cluster *clusterv1.Cluster, machineSet *c
 	return nil
 }
 
-func (gce *GCEMachineSetClient) Resize(cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) error {
+func (gce *GCEMachineSetClient) Resize(ctx context.Context, cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) error {
 	// TODO(janluk): refactor create & exists block
-	err := gce.create(cluster, machineSet)
+	err := gce.create(ctx, cluster, machineSet)
 	if err != nil {
 		return nil
 	}
 
-	igm, err := gce.igmIfExists(cluster, machineSet)
+	igm, err := gce.igmIfExists(ctx, cluster, machineSet)
 	if err != nil {
 		return err
 	}
@@ -213,9 +214,9 @@ func (gce *GCEMachineSetClient) Resize(cluster *clusterv1.Cluster, machineSet *c
 	}
 	glog.Infof("Target IGM [%v] size differs from expected [expected = %d, actual = %d]. Resizing...", igm.Name, newSize, igm.TargetSize)
 
-	op, err := gce.computeService.InstanceGroupManagersResize(clusterSpec.Project, machineSpec.Zone, machineSet.Name, int64(*machineSet.Spec.Replicas))
+	op, err := gce.computeService.InstanceGroupManagersResize(ctx, clusterSpec.Project, machineSpec.Zone, machineSet.Name, int64(*machineSet.Spec.Replicas))
 	if err == nil {
-		err = gce.computeService.WaitForOperation(clusterSpec.Project, op)
+		err = gce.computeService.WaitForOperation(ctx, clusterSpec.Project, op)
 	}
 	if err != nil {
 		return gce.handleMachineSetError(machineSet, err)
@@ -223,8 +224,8 @@ func (gce *GCEMachineSetClient) Resize(cluster *clusterv1.Cluster, machineSet *c
 	return nil
 }
 
-func (gce *GCEMachineSetClient) ListMachines(cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) ([]string, error) {
-	igm, err := gce.igmIfExists(cluster, machineSet)
+func (gce *GCEMachineSetClient) ListMachines(ctx context.Context, cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) ([]string, error) {
+	igm, err := gce.igmIfExists(ctx, cluster, machineSet)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +246,7 @@ func (gce *GCEMachineSetClient) ListMachines(cluster *clusterv1.Cluster, machine
 		return nil, gce.handleMachineSetError(machineSet, err)
 	}
 
-	resp, err := gce.computeService.InstanceGroupManagersListInstances(clusterSpec.Project, machineSpec.Zone, machineSet.Name)
+	resp, err := gce.computeService.InstanceGroupManagersListInstances(ctx, clusterSpec.Project, machineSpec.Zone, machineSet.Name)
 	if err != nil {
 		return nil, err
 	}
