@@ -18,7 +18,6 @@ package machineset
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -182,7 +181,7 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 		}
 
 		glog.Infof("reconciling MachineSet object %v triggers delete.", name)
-		if err := r.delete(ctx, machineSet); err != nil {
+		if err := r.actuator.Delete(ctx, machineSet); err != nil {
 			glog.Errorf("Error deleting MachineSet object %v; %v", name, err)
 			return reconcile.Result{}, err
 		}
@@ -264,17 +263,12 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1alp
 		return fmt.Errorf("the Replicas field in Spec for machineset %v is nil, this should not be allowed.", ms.Name)
 	}
 
-	cluster, err := c.getCluster(ctx, ms)
-	if err != nil {
-		return err
-	}
-
-	if err := c.actuator.Resize(ctx, cluster, ms); err != nil {
+	if err := c.actuator.Resize(ctx, ms); err != nil {
 		glog.Errorf("Error resizing machine set %v", ms.Name)
 		return nil
 	}
 
-	vms, err := c.actuator.ListMachines(ctx, cluster, ms)
+	vms, err := c.actuator.ListMachines(ctx, ms)
 	if err != nil {
 		glog.Errorf("Error listing machines for machine set %v after resize", ms.Name)
 		return err
@@ -293,7 +287,6 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1alp
 		vm = parts[len(parts)-1]
 		existingVms[vm] = true
 		if !existingMachines[vm] {
-
 			machine := c.createMachine(vm, ms)
 			err := c.Client.Create(context.Background(), machine)
 			if err != nil {
@@ -445,30 +438,4 @@ func (c *ReconcileMachineSet) waitForMachineDeletion(machineList []*clusterv1alp
 		}
 	}
 	return nil
-}
-
-func (c *ReconcileMachineSet) getCluster(ctx context.Context, ms *clusterv1alpha1.MachineSet) (*clusterv1alpha1.Cluster, error) {
-	clusterList := clusterv1alpha1.ClusterList{}
-	err := c.Client.List(ctx, client.InNamespace(ms.Namespace), &clusterList)
-	if err != nil {
-		return nil, err
-	}
-
-	switch len(clusterList.Items) {
-	case 0:
-		return nil, errors.New("no clusters defined")
-	case 1:
-		return &clusterList.Items[0], nil
-	default:
-		return nil, errors.New("multiple clusters defined")
-	}
-}
-
-func (c *ReconcileMachineSet) delete(ctx context.Context, ms *clusterv1alpha1.MachineSet) error {
-	cluster, err := c.getCluster(ctx, ms)
-	if err != nil {
-		return err
-	}
-
-	return c.actuator.Delete(ctx, cluster, ms)
 }

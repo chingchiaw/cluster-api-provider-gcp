@@ -7,7 +7,7 @@ import (
 )
 
 type Actuator interface {
-	Delete(context.Context, *clusterv1.Cluster, *clusterv1.MachineSet) error
-	Resize(context.Context, *clusterv1.Cluster, *clusterv1.MachineSet) error
-	ListMachines(context.Context, *clusterv1.Cluster, *clusterv1.MachineSet) ([]string, error)
+	Delete(context.Context, *clusterv1.MachineSet) error
+	Resize(context.Context, *clusterv1.MachineSet) error
+	ListMachines(context.Context, *clusterv1.MachineSet) ([]string, error)
 }

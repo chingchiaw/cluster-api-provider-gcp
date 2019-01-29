@@ -569,6 +569,11 @@ func (gce *GCEClient) updateAnnotations(ctx context.Context, cluster *clusterv1.
 	if err := gce.client.Update(ctx, machine); err != nil {
 		return err
 	}
+	id := fmt.Sprintf("gce://%s/%s/%s", machineConfig.Project, zone, name)
+	machine.Status.ProviderID = &id
+	if err := gce.client.Status().Update(ctx, machine); err != nil {
+		return err
+	}
 	return gce.updateInstanceStatus(ctx, machine)
 }
 
