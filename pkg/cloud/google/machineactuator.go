@@ -139,7 +139,7 @@ func NewMachineActuator(params MachineActuatorParams) (*GCEClient, error) {
 			privateKeyPath: privateKeyPath,
 			user:           user,
 		},
-		client:                   params.Client,
+		client: params.Client,
 		machineSetupConfigGetter: params.MachineSetupConfigGetter,
 		eventRecorder:            params.EventRecorder,
 		scheme:                   params.Scheme,

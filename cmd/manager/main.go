@@ -83,7 +83,7 @@ func main() {
 func initStaticDeps(mgr manager.Manager) {
 	configWatch, err := machinesetup.NewConfigWatch(*machineSetupConfig)
 	if err != nil {
-		klog.Fatalf("Could not create config watch: %v", err)
+		klog.Warningf("Could not create config watch: %v", err)
 	}
 
 	google.MachineActuator, err = google.NewMachineActuator(google.MachineActuatorParams{

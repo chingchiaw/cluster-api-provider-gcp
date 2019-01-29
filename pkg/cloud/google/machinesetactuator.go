@@ -61,19 +61,19 @@ func NewMachineSetActuator(params MachineSetActuatorParams) (*GCEMachineSetClien
 }
 
 func (gce *GCEMachineSetClient) igmIfExists(cluster *clusterv1.Cluster, machineSet *clusterv1.MachineSet) (*compute.InstanceGroupManager, error) {
-	machineConfig, err := machineProviderFromProviderConfig(machineSet.Spec.Template.Spec.ProviderConfig)
+	machineSpec, err := machineProviderFromProviderSpec(machineSet.Spec.Template.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return nil, gce.handleMachineSetError(machineSet, err)
 	}
 
-	clusterConfig, err := clusterProviderFromProviderConfig(cluster.Spec.ProviderConfig)
+	clusterSpec, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return nil, gce.handleMachineSetError(machineSet, err)
 	}
 
-	igm, err := gce.computeService.InstanceGroupManagersGet(clusterConfig.Project, machineConfig.Zone, machineSet.ObjectMeta.Name)
+	igm, err := gce.computeService.InstanceGroupManagersGet(clusterSpec.Project, machineSpec.Zone, machineSet.ObjectMeta.Name)
 	if err != nil {
 		if gerr, ok := err.(*googleapi.Error); ok && gerr.Code == http.StatusNotFound {
 			return nil, nil
@@ -94,31 +94,31 @@ func (gce *GCEMachineSetClient) create(cluster *clusterv1.Cluster, machineSet *c
 		return nil
 	}
 
-	machineConfig, err := machineProviderFromProviderConfig(machineSet.Spec.Template.Spec.ProviderConfig)
+	machineSpec, err := machineProviderFromProviderSpec(machineSet.Spec.Template.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return gce.handleMachineSetError(machineSet, err)
 	}
 
-	clusterConfig, err := clusterProviderFromProviderConfig(cluster.Spec.ProviderConfig)
+	clusterSpec, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return gce.handleMachineSetError(machineSet, err)
 	}
 
-	templateName, err := gce.getOrCreateInstanceTemplate(machineConfig)
+	templateName, err := gce.getOrCreateInstanceTemplate(machineSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return gce.handleMachineSetError(machineSet, err)
 	}
 
-	op, err := gce.computeService.InstanceGroupManagersInsert(clusterConfig.Project, machineConfig.Zone, &compute.InstanceGroupManager{
+	op, err := gce.computeService.InstanceGroupManagersInsert(clusterSpec.Project, machineSpec.Zone, &compute.InstanceGroupManager{
 		InstanceTemplate: fmt.Sprintf("global/instanceTemplates/%s", templateName),
 		Name:             machineSet.ObjectMeta.Name,
 		TargetSize:       int64(*machineSet.Spec.Replicas),
 	})
 	if err == nil {
-		err = gce.computeService.WaitForOperation(clusterConfig.Project, op)
+		err = gce.computeService.WaitForOperation(clusterSpec.Project, op)
 	}
 	if err != nil {
 		return gce.handleMachineSetError(machineSet, err)
@@ -126,9 +126,8 @@ func (gce *GCEMachineSetClient) create(cluster *clusterv1.Cluster, machineSet *c
 	return nil
 }
 
-func (gce *GCEMachineSetClient) getOrCreateInstanceTemplate(machineConfig *gceconfigv1.GCEMachineProviderConfig) (string, error) {
-	// TODO(janluk): either use InstanceTemplate stored in MachineConfig or create one
-	return "clusterapi-machine-v03", nil
+func (gce *GCEMachineSetClient) getOrCreateInstanceTemplate(machineSpec *gceconfigv1.GCEMachineProviderSpec) (string, error) {
+	return machineSpec.InstanceTemplate, nil
 }
 
 func (gce *GCEMachineSetClient) handleMachineSetError(machineSet *clusterv1.MachineSet, err error) error {
@@ -153,21 +152,21 @@ func (gce *GCEMachineSetClient) Delete(cluster *clusterv1.Cluster, machineSet *c
 		return nil
 	}
 
-	machineConfig, err := machineProviderFromProviderConfig(machineSet.Spec.Template.Spec.ProviderConfig)
+	machineSpec, err := machineProviderFromProviderSpec(machineSet.Spec.Template.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return gce.handleMachineSetError(machineSet, err)
 	}
 
-	clusterConfig, err := clusterProviderFromProviderConfig(cluster.Spec.ProviderConfig)
+	clusterSpec, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return gce.handleMachineSetError(machineSet, err)
 	}
 
-	op, err := gce.computeService.InstanceGroupManagersDelete(clusterConfig.Project, machineConfig.Zone, machineSet.Name)
+	op, err := gce.computeService.InstanceGroupManagersDelete(clusterSpec.Project, machineSpec.Zone, machineSet.Name)
 	if err == nil {
-		err = gce.computeService.WaitForOperation(clusterConfig.Project, op)
+		err = gce.computeService.WaitForOperation(clusterSpec.Project, op)
 	}
 	if err != nil {
 		return gce.handleMachineSetError(machineSet, err)
@@ -195,13 +194,13 @@ func (gce *GCEMachineSetClient) Resize(cluster *clusterv1.Cluster, machineSet *c
 		return nil
 	}
 
-	machineConfig, err := machineProviderFromProviderConfig(machineSet.Spec.Template.Spec.ProviderConfig)
+	machineSpec, err := machineProviderFromProviderSpec(machineSet.Spec.Template.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return gce.handleMachineSetError(machineSet, err)
 	}
 
-	clusterConfig, err := clusterProviderFromProviderConfig(cluster.Spec.ProviderConfig)
+	clusterSpec, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return gce.handleMachineSetError(machineSet, err)
@@ -214,9 +213,9 @@ func (gce *GCEMachineSetClient) Resize(cluster *clusterv1.Cluster, machineSet *c
 	}
 	glog.Infof("Target IGM [%v] size differs from expected [expected = %d, actual = %d]. Resizing...", igm.Name, newSize, igm.TargetSize)
 
-	op, err := gce.computeService.InstanceGroupManagersResize(clusterConfig.Project, machineConfig.Zone, machineSet.Name, int64(*machineSet.Spec.Replicas))
+	op, err := gce.computeService.InstanceGroupManagersResize(clusterSpec.Project, machineSpec.Zone, machineSet.Name, int64(*machineSet.Spec.Replicas))
 	if err == nil {
-		err = gce.computeService.WaitForOperation(clusterConfig.Project, op)
+		err = gce.computeService.WaitForOperation(clusterSpec.Project, op)
 	}
 	if err != nil {
 		return gce.handleMachineSetError(machineSet, err)
@@ -234,19 +233,19 @@ func (gce *GCEMachineSetClient) ListMachines(cluster *clusterv1.Cluster, machine
 		return nil, errors.New("asdsad")
 	}
 
-	machineConfig, err := machineProviderFromProviderConfig(machineSet.Spec.Template.Spec.ProviderConfig)
+	machineSpec, err := machineProviderFromProviderSpec(machineSet.Spec.Template.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return nil, gce.handleMachineSetError(machineSet, err)
 	}
 
-	clusterConfig, err := clusterProviderFromProviderConfig(cluster.Spec.ProviderConfig)
+	clusterSpec, err := clusterProviderFromProviderSpec(cluster.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
 		return nil, gce.handleMachineSetError(machineSet, err)
 	}
 
-	resp, err := gce.computeService.InstanceGroupManagersListInstances(clusterConfig.Project, machineConfig.Zone, machineSet.Name)
+	resp, err := gce.computeService.InstanceGroupManagersListInstances(clusterSpec.Project, machineSpec.Zone, machineSet.Name)
 	if err != nil {
 		return nil, err
 	}
