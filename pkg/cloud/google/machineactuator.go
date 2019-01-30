@@ -236,6 +236,9 @@ func (gce *GCEClient) ProvisionClusterDependencies(cluster *clusterv1.Cluster) e
 }
 
 func (gce *GCEClient) Create(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
+	if machine.Annotations != nil && machine.Annotations["mig-based"] == "true" {
+		return gce.updateAnnotations(ctx, cluster, machine)
+	}
 	machineConfig, err := machineProviderFromProviderSpec(machine.Spec.ProviderSpec)
 	if err != nil {
 		return gce.handleMachineError(ctx, machine, apierrors.InvalidMachineConfiguration(
@@ -371,6 +374,9 @@ func (gce *GCEClient) create(ctx context.Context, cluster *clusterv1.Cluster, ma
 }
 
 func (gce *GCEClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
+	if machine.Annotations != nil && machine.Annotations["mig-based"] == "true" {
+		return nil
+	}
 	instance, err := gce.instanceIfExists(ctx, cluster, machine)
 	if err != nil {
 		return err

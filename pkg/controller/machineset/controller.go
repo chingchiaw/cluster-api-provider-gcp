@@ -19,8 +19,7 @@ package machineset
 import (
 	"context"
 	"fmt"
-	"strings"
-	"sync"
+	"path"
 	"time"
 
 	"github.com/golang/glog"
@@ -37,7 +36,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-const MachineSetFinalizer = "machineset.cluster.k8s.io"
+const (
+	MachineSetFinalizer     = "machineset.cluster.k8s.io"
+	MIGMachineSetAnnotation = "mig-based"
+)
 
 var controllerKind = clusterv1alpha1.SchemeGroupVersion.WithKind("MachineSet")
 
@@ -211,17 +213,15 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 		}
 		// Attempt to adopt machine if it meets previous conditions and it has no controller ref.
 		if metav1.GetControllerOf(machine) == nil {
-			// TODO(janluk): kill orphans?
 			continue
-			// if err := r.adoptOrphan(ms, machine); err != nil {
-			// 	glog.Warningf("failed to adopt machine %v into machineset %v. %v", machine.Name, ms.Name, err)
-			// 	continue
-			// }
 		}
 		filteredMachines = append(filteredMachines, machine)
 	}
 
 	syncErr := r.syncReplicas(ctx, machineSet, filteredMachines)
+	if syncErr != nil {
+		glog.Error(syncErr)
+	}
 
 	ms := machineSet.DeepCopy()
 	newStatus := r.calculateStatus(ms, filteredMachines)
@@ -263,92 +263,57 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1alp
 		return fmt.Errorf("the Replicas field in Spec for machineset %v is nil, this should not be allowed.", ms.Name)
 	}
 
-	if err := c.actuator.Resize(ctx, ms); err != nil {
-		glog.Errorf("Error resizing machine set %v", ms.Name)
-		return nil
-	}
-
-	vms, err := c.actuator.ListMachines(ctx, ms)
-	if err != nil {
-		glog.Errorf("Error listing machines for machine set %v after resize", ms.Name)
-		return err
-	}
-
 	existingMachines := make(map[string]bool)
 	for _, m := range machines {
 		existingMachines[m.Name] = true
 	}
 
-	var createdMachines []*clusterv1alpha1.Machine
-	var errstrings []string
-	existingVms := make(map[string]bool)
-	for _, vm := range vms {
-		parts := strings.Split(vm, "/")
-		vm = parts[len(parts)-1]
-		existingVms[vm] = true
-		if !existingMachines[vm] {
-			machine := c.createMachine(vm, ms)
-			err := c.Client.Create(context.Background(), machine)
-			if err != nil {
-				glog.Errorf("unable to create a machine = %s, due to %v", machine.Name, err)
-				errstrings = append(errstrings, err.Error())
-				continue
-			}
-			createdMachines = append(createdMachines, machine)
-		}
-	}
-	if len(errstrings) > 0 {
-		return fmt.Errorf(strings.Join(errstrings, "; "))
+	if err := c.actuator.Resize(ctx, ms); err != nil {
+		glog.Errorf("Error resizing machine set %v: %v", ms.Name, err)
+		return nil
 	}
 
-	err = c.waitForMachineCreation(createdMachines)
+	vms, err := c.actuator.ListMachines(ctx, ms)
 	if err != nil {
+		glog.Errorf("Error listing machines for machine set %v after resize: %v", ms.Name, err)
 		return err
 	}
 
-	var machinesToDelete []*clusterv1alpha1.Machine
-	for _, m := range machines {
-		if !existingVms[m.Name] {
-			machinesToDelete = append(machinesToDelete, m)
-		}
-	}
-
-	// TODO: Add cap to limit concurrent delete calls.
-	diff := len(machinesToDelete)
-	errCh := make(chan error, diff)
-	var wg sync.WaitGroup
-	wg.Add(diff)
-	for _, machine := range machinesToDelete {
-		go func(targetMachine *clusterv1alpha1.Machine) {
-			defer wg.Done()
-			err := c.Client.Delete(context.Background(), targetMachine)
+	existingVMs := make(map[string]bool)
+	for _, vmURL := range vms {
+		vm := path.Base(vmURL)
+		existingVMs[vm] = true
+		if !existingMachines[vm] {
+			machine := c.newMachine(vm, ms)
+			err := c.Client.Create(ctx, machine)
 			if err != nil {
-				glog.Errorf("unable to delete a machine = %s, due to %v", targetMachine.Name, err)
-				errCh <- err
+				glog.Errorf("unable to create a machine = %s, due to %v", machine.Name, err)
 			}
-		}(machine)
-	}
-	wg.Wait()
-
-	select {
-	case err := <-errCh:
-		// all errors have been reported before and they're likely to be the same, so we'll only return the first one we hit.
-		if err != nil {
-			return err
 		}
-	default:
 	}
-	return c.waitForMachineDeletion(machinesToDelete)
 
+	// Cleaning up orphaned machines, the VMs do not exist.
+	// What about VMs that are being deleted?
+	// todo(maisem): how to handle drains?
+	for _, m := range machines {
+		if !existingVMs[m.Name] {
+			err := c.Client.Delete(ctx, m)
+			if err != nil {
+				glog.Errorf("unable to delete a machine = %s, due to %v", m.Name, err)
+			}
+		}
+	}
+
+	return nil
 }
 
-// createMachine creates a machine resource.
-// the name of the newly created resource is going to be created by the API server, we set the generateName field
-func (c *ReconcileMachineSet) createMachine(machineName string, ms *clusterv1alpha1.MachineSet) *clusterv1alpha1.Machine {
+// newMachine news a machine resource.
+// the name of the newly newd resource is going to be newd by the API server, we set the generateName field
+func (c *ReconcileMachineSet) newMachine(machineName string, ms *clusterv1alpha1.MachineSet) *clusterv1alpha1.Machine {
 	gv := clusterv1alpha1.SchemeGroupVersion
 	machine := &clusterv1alpha1.Machine{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       gv.WithKind("Machine").Kind,
+			Kind:       "Machine",
 			APIVersion: gv.String(),
 		},
 		ObjectMeta: ms.Spec.Template.ObjectMeta,
@@ -357,6 +322,10 @@ func (c *ReconcileMachineSet) createMachine(machineName string, ms *clusterv1alp
 	machine.ObjectMeta.Name = machineName
 	machine.ObjectMeta.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(ms, controllerKind)}
 	machine.Namespace = ms.Namespace
+	if machine.Annotations == nil {
+		machine.Annotations = make(map[string]string)
+	}
+	machine.Annotations["mig-based"] = "true"
 
 	return machine
 }
@@ -372,70 +341,4 @@ func shouldExcludeMachine(ms *clusterv1alpha1.MachineSet, machine *clusterv1alph
 		return true
 	}
 	return false
-}
-
-func (c *ReconcileMachineSet) adoptOrphan(ms *clusterv1alpha1.MachineSet, machine *clusterv1alpha1.Machine) error {
-	// Add controller reference.
-	ownerRefs := machine.ObjectMeta.GetOwnerReferences()
-	if ownerRefs == nil {
-		ownerRefs = []metav1.OwnerReference{}
-	}
-
-	newRef := *metav1.NewControllerRef(ms, controllerKind)
-	ownerRefs = append(ownerRefs, newRef)
-	machine.ObjectMeta.SetOwnerReferences(ownerRefs)
-	if err := c.Client.Update(context.Background(), machine); err != nil {
-		glog.Warningf("Failed to update machine owner reference. %v", err)
-		return err
-	}
-	return nil
-}
-
-func getMachinesToDelete(filteredMachines []*clusterv1alpha1.Machine, diff int) []*clusterv1alpha1.Machine {
-	// TODO: Define machines deletion policies.
-	// see: https://github.com/kubernetes/kube-deploy/issues/625
-	return filteredMachines[:diff]
-}
-
-func (c *ReconcileMachineSet) waitForMachineCreation(machineList []*clusterv1alpha1.Machine) error {
-	for _, machine := range machineList {
-		pollErr := util.Poll(stateConfirmationInterval, stateConfirmationTimeout, func() (bool, error) {
-			err := c.Client.Get(context.Background(),
-				client.ObjectKey{Namespace: machine.Namespace, Name: machine.Name},
-				&clusterv1alpha1.Machine{})
-			if err == nil {
-				return true, nil
-			}
-			glog.Error(err)
-			if apierrors.IsNotFound(err) {
-				return false, nil
-			}
-			return false, err
-		})
-		if pollErr != nil {
-			glog.Error(pollErr)
-			return fmt.Errorf("failed waiting for machine object to be created. %v", pollErr)
-		}
-	}
-	return nil
-}
-
-func (c *ReconcileMachineSet) waitForMachineDeletion(machineList []*clusterv1alpha1.Machine) error {
-	for _, machine := range machineList {
-		pollErr := util.Poll(stateConfirmationInterval, stateConfirmationTimeout, func() (bool, error) {
-			m := &clusterv1alpha1.Machine{}
-			err := c.Client.Get(context.Background(),
-				client.ObjectKey{Namespace: machine.Namespace, Name: machine.Name},
-				m)
-			if apierrors.IsNotFound(err) || !m.DeletionTimestamp.IsZero() {
-				return true, nil
-			}
-			return false, err
-		})
-		if pollErr != nil {
-			glog.Error(pollErr)
-			return fmt.Errorf("failed waiting for machine object to be deleted. %v", pollErr)
-		}
-	}
-	return nil
 }

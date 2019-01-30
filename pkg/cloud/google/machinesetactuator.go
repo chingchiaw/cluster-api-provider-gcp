@@ -187,6 +187,8 @@ func (gce *GCEMachineSetClient) Resize(ctx context.Context, machineSet *clusterv
 		glog.Infof("Target IGM [%v] has expected size of %d", igm.Name, igm.TargetSize)
 		return nil
 	}
+
+	// TODO(maisem): figure out a way to resize down.
 	glog.Infof("Target IGM [%v] size differs from expected [expected = %d, actual = %d]. Resizing...", igm.Name, newSize, igm.TargetSize)
 
 	op, err := gce.computeService.InstanceGroupManagersResize(ctx, machineSpec.Project, machineSpec.Zone, machineSet.Name, int64(*machineSet.Spec.Replicas))
