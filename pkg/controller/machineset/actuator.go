@@ -9,5 +9,6 @@ import (
 type Actuator interface {
 	Delete(context.Context, *clusterv1.MachineSet) error
 	Resize(context.Context, *clusterv1.MachineSet) error
+	GetSize(context.Context, *clusterv1.MachineSet) (int64, error)
 	ListMachines(context.Context, *clusterv1.MachineSet) ([]string, error)
 }

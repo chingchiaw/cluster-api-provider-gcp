@@ -26,7 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	clusterv1alpha1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
+	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 	"sigs.k8s.io/cluster-api/pkg/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -38,10 +38,10 @@ import (
 
 const (
 	MachineSetFinalizer     = "machineset.cluster.k8s.io"
-	MIGMachineSetAnnotation = "mig-based"
+	MIGMachineSetAnnotation = "mig-name"
 )
 
-var controllerKind = clusterv1alpha1.SchemeGroupVersion.WithKind("MachineSet")
+var controllerKind = clusterv1.SchemeGroupVersion.WithKind("MachineSet")
 
 // stateConfirmationTimeout is the amount of time allowed to wait for desired state.
 var stateConfirmationTimeout = 10 * time.Second
@@ -76,15 +76,15 @@ func add(mgr manager.Manager, r reconcile.Reconciler, mapFn handler.ToRequestsFu
 	}
 
 	// Watch for changes to MachineSet
-	err = c.Watch(&source.Kind{Type: &clusterv1alpha1.MachineSet{}}, &handler.EnqueueRequestForObject{})
+	err = c.Watch(&source.Kind{Type: &clusterv1.MachineSet{}}, &handler.EnqueueRequestForObject{})
 	if err != nil {
 		return err
 	}
 
 	// Map Machine changes to MachineSets using ControllerRef
 	err = c.Watch(
-		&source.Kind{Type: &clusterv1alpha1.Machine{}},
-		&handler.EnqueueRequestForOwner{IsController: true, OwnerType: &clusterv1alpha1.MachineSet{}},
+		&source.Kind{Type: &clusterv1.Machine{}},
+		&handler.EnqueueRequestForOwner{IsController: true, OwnerType: &clusterv1.MachineSet{}},
 	)
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler, mapFn handler.ToRequestsFu
 
 	// Map Machine changes to MachineSets by machining labels
 	err = c.Watch(
-		&source.Kind{Type: &clusterv1alpha1.Machine{}},
+		&source.Kind{Type: &clusterv1.Machine{}},
 		&handler.EnqueueRequestsFromMapFunc{ToRequests: mapFn})
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ type ReconcileMachineSet struct {
 
 func (r *ReconcileMachineSet) MachineSetToMachines(o handler.MapObject) []reconcile.Request {
 	result := []reconcile.Request{}
-	m := &clusterv1alpha1.Machine{}
+	m := &clusterv1.Machine{}
 	key := client.ObjectKey{Namespace: o.Meta.GetNamespace(), Name: o.Meta.GetName()}
 	err := r.Client.Get(context.Background(), key, m)
 	if err != nil {
@@ -149,7 +149,7 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 	ctx := context.TODO()
 
 	// Fetch the MachineSet instance
-	machineSet := &clusterv1alpha1.MachineSet{}
+	machineSet := &clusterv1.MachineSet{}
 	err := r.Get(ctx, request.NamespacedName, machineSet)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -198,14 +198,15 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 		return reconcile.Result{}, nil
 	}
 
-	allMachines := &clusterv1alpha1.MachineList{}
-	err = r.Client.List(context.Background(), client.InNamespace(machineSet.Namespace), allMachines)
+	allMachines := &clusterv1.MachineList{}
+	lo := client.InNamespace(machineSet.Namespace).MatchingLabels(machineSet.Spec.Selector.MatchLabels)
+	err = r.Client.List(context.Background(), lo, allMachines)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to list machines, %v", err)
 	}
 
 	// Filter out irrelevant machines (deleting/mismatch labels) and claim orphaned machines.
-	var filteredMachines []*clusterv1alpha1.Machine
+	var filteredMachines []*clusterv1.Machine
 	for idx := range allMachines.Items {
 		machine := &allMachines.Items[idx]
 		if shouldExcludeMachine(machineSet, machine) {
@@ -257,8 +258,36 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 	return reconcile.Result{}, nil
 }
 
+func (c *ReconcileMachineSet) scaleDown(ctx context.Context, ms *clusterv1.MachineSet, machines []*clusterv1.Machine, n int64) error {
+	alreadyDeleting := int64(0)
+	if n == 0 {
+		return nil
+	}
+	var runningMachines []*clusterv1.Machine
+	for _, m := range machines {
+		if !m.DeletionTimestamp.IsZero() {
+			alreadyDeleting++
+		} else {
+			runningMachines = append(runningMachines, m)
+		}
+	}
+	toDelete := n - alreadyDeleting
+	for _, m := range runningMachines {
+		if toDelete <= 0 {
+			// Nothing to do here.
+			return nil
+		}
+		if err := c.Client.Delete(ctx, m); err != nil {
+			glog.Errorf("unable to delete a machine = %s, due to %v", m.Name, err)
+			return err
+		}
+		toDelete--
+	}
+	return nil
+}
+
 // syncReplicas essentially scales machine resources up and down.
-func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1alpha1.MachineSet, machines []*clusterv1alpha1.Machine) error {
+func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1.MachineSet, machines []*clusterv1.Machine) error {
 	if ms.Spec.Replicas == nil {
 		return fmt.Errorf("the Replicas field in Spec for machineset %v is nil, this should not be allowed.", ms.Name)
 	}
@@ -268,9 +297,21 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1alp
 		existingMachines[m.Name] = true
 	}
 
-	if err := c.actuator.Resize(ctx, ms); err != nil {
-		glog.Errorf("Error resizing machine set %v: %v", ms.Name, err)
-		return nil
+	desired, err := c.actuator.GetSize(ctx, ms)
+	if err != nil {
+		return err
+	}
+	current := int64(*ms.Spec.Replicas)
+	if desired < current {
+		if err := c.scaleDown(ctx, ms, machines, current-desired); err != nil {
+			glog.Errorf("Error scaling down machine set %v: %v", ms.Name, err)
+			return err
+		}
+	} else {
+		if err := c.actuator.Resize(ctx, ms); err != nil {
+			glog.Errorf("Error resizing machine set %v: %v", ms.Name, err)
+			return err
+		}
 	}
 
 	vms, err := c.actuator.ListMachines(ctx, ms)
@@ -284,7 +325,7 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1alp
 		vm := path.Base(vmURL)
 		existingVMs[vm] = true
 		if !existingMachines[vm] {
-			machine := c.newMachine(vm, ms)
+			machine := newMachine(vm, ms)
 			err := c.Client.Create(ctx, machine)
 			if err != nil {
 				glog.Errorf("unable to create a machine = %s, due to %v", machine.Name, err)
@@ -309,9 +350,9 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1alp
 
 // newMachine news a machine resource.
 // the name of the newly newd resource is going to be newd by the API server, we set the generateName field
-func (c *ReconcileMachineSet) newMachine(machineName string, ms *clusterv1alpha1.MachineSet) *clusterv1alpha1.Machine {
-	gv := clusterv1alpha1.SchemeGroupVersion
-	machine := &clusterv1alpha1.Machine{
+func newMachine(machineName string, ms *clusterv1.MachineSet) *clusterv1.Machine {
+	gv := clusterv1.SchemeGroupVersion
+	machine := &clusterv1.Machine{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Machine",
 			APIVersion: gv.String(),
@@ -325,19 +366,15 @@ func (c *ReconcileMachineSet) newMachine(machineName string, ms *clusterv1alpha1
 	if machine.Annotations == nil {
 		machine.Annotations = make(map[string]string)
 	}
-	machine.Annotations["mig-based"] = "true"
-
+	machine.Annotations[MIGMachineSetAnnotation] = ms.Name
 	return machine
 }
 
 // shoudExcludeMachine returns true if the machine should be filtered out, false otherwise.
-func shouldExcludeMachine(ms *clusterv1alpha1.MachineSet, machine *clusterv1alpha1.Machine) bool {
+func shouldExcludeMachine(ms *clusterv1.MachineSet, machine *clusterv1.Machine) bool {
 	// Ignore inactive machines.
 	if metav1.GetControllerOf(machine) != nil && !metav1.IsControlledBy(machine, ms) {
 		glog.V(4).Infof("%s not controlled by %v", machine.Name, ms.Name)
-		return true
-	}
-	if !hasMatchingLabels(ms, machine) {
 		return true
 	}
 	return false

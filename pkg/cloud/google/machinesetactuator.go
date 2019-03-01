@@ -160,43 +160,58 @@ func (gce *GCEMachineSetClient) Delete(ctx context.Context, machineSet *clusterv
 	return nil
 }
 
-func (gce *GCEMachineSetClient) Resize(ctx context.Context, machineSet *clusterv1.MachineSet) error {
+func (gce *GCEMachineSetClient) GetSize(ctx context.Context, ms *clusterv1.MachineSet) (int64, error) {
+	igm, err := gce.igmIfExists(ctx, ms)
+	if err != nil {
+		return -1, err
+	}
+
+	if igm == nil {
+		glog.Infof("IGM [%v] not found. Skipping resize.", ms.ObjectMeta.Name)
+		return -1, err
+	}
+	return igm.TargetSize, nil
+}
+
+func (gce *GCEMachineSetClient) Resize(ctx context.Context, ms *clusterv1.MachineSet) error {
 	// TODO(janluk): refactor create & exists block
-	err := gce.create(ctx, machineSet)
+	err := gce.create(ctx, ms)
 	if err != nil {
 		return nil
 	}
 
-	igm, err := gce.igmIfExists(ctx, machineSet)
+	igm, err := gce.igmIfExists(ctx, ms)
 	if err != nil {
 		return err
 	}
 
 	if igm == nil {
-		glog.Infof("IGM [%v] not found. Skipping resize.", machineSet.ObjectMeta.Name)
+		glog.Infof("IGM [%v] not found. Skipping resize.", ms.ObjectMeta.Name)
 		return nil
 	}
 
-	machineSpec, err := machineProviderFromProviderSpec(machineSet.Spec.Template.Spec.ProviderSpec)
+	machineSpec, err := machineProviderFromProviderSpec(ms.Spec.Template.Spec.ProviderSpec)
 	if err != nil {
 		// TODO(janluk): proper error handling
-		return gce.handleMachineSetError(machineSet, err)
+		return gce.handleMachineSetError(ms, err)
 	}
-	newSize := int64(*machineSet.Spec.Replicas)
+	newSize := int64(*ms.Spec.Replicas)
 	if newSize == igm.TargetSize {
 		glog.Infof("Target IGM [%v] has expected size of %d", igm.Name, igm.TargetSize)
 		return nil
 	}
-
-	// TODO(maisem): figure out a way to resize down.
 	glog.Infof("Target IGM [%v] size differs from expected [expected = %d, actual = %d]. Resizing...", igm.Name, newSize, igm.TargetSize)
+	if newSize < igm.TargetSize {
+		// Size down.
+		return fmt.Errorf("resizing down is unsupported")
+	}
 
-	op, err := gce.computeService.InstanceGroupManagersResize(ctx, machineSpec.Project, machineSpec.Zone, machineSet.Name, int64(*machineSet.Spec.Replicas))
+	op, err := gce.computeService.InstanceGroupManagersResize(ctx, machineSpec.Project, machineSpec.Zone, ms.Name, int64(*ms.Spec.Replicas))
 	if err == nil {
 		err = gce.computeService.WaitForOperation(ctx, machineSpec.Project, op)
 	}
 	if err != nil {
-		return gce.handleMachineSetError(machineSet, err)
+		return gce.handleMachineSetError(ms, err)
 	}
 	return nil
 }

@@ -137,6 +137,12 @@ func (c *ComputeService) InstanceGroupManagersResize(ctx context.Context, projec
 	return c.service.InstanceGroupManagers.Resize(project, zone, igm, size).Context(ctx).Do()
 }
 
+func (c *ComputeService) InstanceGroupManagersDeleteInstance(ctx context.Context, project, zone, igm, instance string) (*compute.Operation, error) {
+	return c.service.InstanceGroupManagers.DeleteInstances(project, zone, igm, &compute.InstanceGroupManagersDeleteInstancesRequest{
+		Instances: []string{path.Join("zones", zone, "instances", instance)},
+	}).Context(ctx).Do()
+}
+
 func (c *ComputeService) InstanceGroupManagersListInstances(ctx context.Context, project, zone, igm string) (*compute.InstanceGroupManagersListManagedInstancesResponse, error) {
 	return c.service.InstanceGroupManagers.ListManagedInstances(project, zone, igm).Context(ctx).Do()
 }

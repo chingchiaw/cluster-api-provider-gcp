@@ -236,7 +236,7 @@ func (gce *GCEClient) ProvisionClusterDependencies(cluster *clusterv1.Cluster) e
 }
 
 func (gce *GCEClient) Create(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
-	if machine.Annotations != nil && machine.Annotations["mig-based"] == "true" {
+	if machine.Annotations != nil && machine.Annotations["mig-name"] != "" {
 		return gce.updateAnnotations(ctx, cluster, machine)
 	}
 	machineConfig, err := machineProviderFromProviderSpec(machine.Spec.ProviderSpec)
@@ -374,9 +374,6 @@ func (gce *GCEClient) create(ctx context.Context, cluster *clusterv1.Cluster, ma
 }
 
 func (gce *GCEClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
-	if machine.Annotations != nil && machine.Annotations["mig-based"] == "true" {
-		return nil
-	}
 	instance, err := gce.instanceIfExists(ctx, cluster, machine)
 	if err != nil {
 		return err
@@ -410,8 +407,12 @@ func (gce *GCEClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, ma
 		zone = machineConfig.Zone
 		name = machine.ObjectMeta.Name
 	}
-
-	op, err := gce.computeService.InstancesDelete(ctx, project, zone, name)
+	var op *compute.Operation
+	if machine.Annotations != nil && machine.Annotations["mig-name"] != "" {
+		op, err = gce.computeService.InstanceGroupManagersDeleteInstance(ctx, project, zone, machine.Annotations["mig-name"], name)
+	} else {
+		op, err = gce.computeService.InstancesDelete(ctx, project, zone, name)
+	}
 	if err == nil {
 		err = gce.computeService.WaitForOperation(ctx, project, op)
 	}
@@ -572,7 +573,7 @@ func (gce *GCEClient) updateAnnotations(ctx context.Context, cluster *clusterv1.
 		return err
 	}
 	id := fmt.Sprintf("gce://%s/%s/%s", machineConfig.Project, zone, name)
-	machine.Status.ProviderID = &id
+	machine.Spec.ProviderID = id
 	if err := gce.client.Status().Update(ctx, machine); err != nil {
 		return err
 	}

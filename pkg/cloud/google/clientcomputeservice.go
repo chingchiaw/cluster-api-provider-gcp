@@ -42,6 +42,7 @@ type GCEClientComputeService interface {
 	InstanceGroupManagersGet(ctx context.Context, project, zone, igm string) (*compute.InstanceGroupManager, error)
 	InstanceGroupManagersInsert(ctx context.Context, project, zone string, igm *compute.InstanceGroupManager) (*compute.Operation, error)
 	InstanceGroupManagersDelete(ctx context.Context, project, zone, igm string) (*compute.Operation, error)
+	InstanceGroupManagersDeleteInstance(ctx context.Context, project, zone, igm, instance string) (*compute.Operation, error)
 	InstanceGroupManagersResize(ctx context.Context, project, zone, igm string, size int64) (*compute.Operation, error)
 	InstanceGroupManagersListInstances(ctx context.Context, project, zone, igm string) (*compute.InstanceGroupManagersListManagedInstancesResponse, error)
 }
