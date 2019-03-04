@@ -573,7 +573,7 @@ func (gce *GCEClient) updateAnnotations(ctx context.Context, cluster *clusterv1.
 		return err
 	}
 	id := fmt.Sprintf("gce://%s/%s/%s", machineConfig.Project, zone, name)
-	machine.Spec.ProviderID = id
+	machine.Spec.ProviderID = &id
 	if err := gce.client.Status().Update(ctx, machine); err != nil {
 		return err
 	}

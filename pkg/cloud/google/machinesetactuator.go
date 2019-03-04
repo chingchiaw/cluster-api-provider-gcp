@@ -165,10 +165,8 @@ func (gce *GCEMachineSetClient) GetSize(ctx context.Context, ms *clusterv1.Machi
 	if err != nil {
 		return -1, err
 	}
-
 	if igm == nil {
-		glog.Infof("IGM [%v] not found. Skipping resize.", ms.ObjectMeta.Name)
-		return -1, err
+		return 0, nil
 	}
 	return igm.TargetSize, nil
 }

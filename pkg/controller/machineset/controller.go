@@ -286,6 +286,20 @@ func (c *ReconcileMachineSet) scaleDown(ctx context.Context, ms *clusterv1.Machi
 	return nil
 }
 
+func (c *ReconcileMachineSet) scale(ctx context.Context, ms *clusterv1.MachineSet, machines []*clusterv1.Machine) error {
+	current, err := c.actuator.GetSize(ctx, ms)
+	if err != nil {
+		return err
+	}
+	desired := int64(*ms.Spec.Replicas)
+	if desired < current {
+		glog.Infof("Resizing down, desired %d, current %d", desired, current)
+		return c.scaleDown(ctx, ms, machines, current-desired)
+	}
+	glog.Infof("Resizing up, desired %d, current %d", desired, current)
+	return c.actuator.Resize(ctx, ms)
+}
+
 // syncReplicas essentially scales machine resources up and down.
 func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1.MachineSet, machines []*clusterv1.Machine) error {
 	if ms.Spec.Replicas == nil {
@@ -297,21 +311,9 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1.Ma
 		existingMachines[m.Name] = true
 	}
 
-	desired, err := c.actuator.GetSize(ctx, ms)
-	if err != nil {
+	if err := c.scale(ctx, ms, machines); err != nil {
+		glog.Errorf("Scaling machineset %v failed: %v", ms.Name, err)
 		return err
-	}
-	current := int64(*ms.Spec.Replicas)
-	if desired < current {
-		if err := c.scaleDown(ctx, ms, machines, current-desired); err != nil {
-			glog.Errorf("Error scaling down machine set %v: %v", ms.Name, err)
-			return err
-		}
-	} else {
-		if err := c.actuator.Resize(ctx, ms); err != nil {
-			glog.Errorf("Error resizing machine set %v: %v", ms.Name, err)
-			return err
-		}
 	}
 
 	vms, err := c.actuator.ListMachines(ctx, ms)

@@ -17,13 +17,13 @@ limitations under the License.
 package clients_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	compute "google.golang.org/api/compute/v1"
 	"sigs.k8s.io/cluster-api-provider-gcp/pkg/cloud/google/clients"
-	"sigs.k8s.io/cluster-api/bazel-cluster-api/external/go_sdk/src/context"
 )
 
 func TestImagesGet(t *testing.T) {
