@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/golang/glog"
 	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog"
 
 	gceconfigv1 "sigs.k8s.io/cluster-api-provider-gcp/pkg/apis/gceproviderconfig/v1alpha1"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
@@ -85,7 +85,7 @@ func (gce *GCEMachineSetClient) create(ctx context.Context, machineSet *clusterv
 	}
 
 	if igm != nil {
-		glog.Infof("Skipped creating IGM [%v] that already exists", machineSet.ObjectMeta.Name)
+		klog.Infof("Skipped creating IGM [%v] that already exists", machineSet.ObjectMeta.Name)
 		return nil
 	}
 
@@ -126,7 +126,7 @@ func (gce *GCEMachineSetClient) handleMachineSetError(machineSet *clusterv1.Mach
 		// gce.machineSetClient.UpdateStatus(machineSet)
 		// TODO(janluk): panic?
 	}
-	glog.Errorf("Machine set error: %v", err)
+	klog.Errorf("Machine set error: %v", err)
 	return err
 }
 
@@ -137,7 +137,7 @@ func (gce *GCEMachineSetClient) Delete(ctx context.Context, machineSet *clusterv
 	}
 
 	if igm == nil {
-		glog.Infof("Skipped deleting IGM [%v] that is already deleted", machineSet.ObjectMeta.Name)
+		klog.Infof("Skipped deleting IGM [%v] that is already deleted", machineSet.ObjectMeta.Name)
 		return nil
 	}
 
@@ -184,7 +184,7 @@ func (gce *GCEMachineSetClient) Resize(ctx context.Context, ms *clusterv1.Machin
 	}
 
 	if igm == nil {
-		glog.Infof("IGM [%v] not found. Skipping resize.", ms.ObjectMeta.Name)
+		klog.Infof("IGM [%v] not found. Skipping resize.", ms.ObjectMeta.Name)
 		return nil
 	}
 
@@ -195,10 +195,10 @@ func (gce *GCEMachineSetClient) Resize(ctx context.Context, ms *clusterv1.Machin
 	}
 	newSize := int64(*ms.Spec.Replicas)
 	if newSize == igm.TargetSize {
-		glog.Infof("Target IGM [%v] has expected size of %d", igm.Name, igm.TargetSize)
+		klog.Infof("Target IGM [%v] has expected size of %d", igm.Name, igm.TargetSize)
 		return nil
 	}
-	glog.Infof("Target IGM [%v] size differs from expected [expected = %d, actual = %d]. Resizing...", igm.Name, newSize, igm.TargetSize)
+	klog.Infof("Target IGM [%v] size differs from expected [expected = %d, actual = %d]. Resizing...", igm.Name, newSize, igm.TargetSize)
 	if newSize < igm.TargetSize {
 		// Size down.
 		return fmt.Errorf("resizing down is unsupported")
@@ -240,6 +240,10 @@ func (gce *GCEMachineSetClient) ListMachines(ctx context.Context, machineSet *cl
 	}
 	machines := make([]string, 0, len(resp.ManagedInstances))
 	for _, mi := range resp.ManagedInstances {
+		switch mi.CurrentAction {
+		case "DELETING", "ABANDONING":
+			continue
+		}
 		machines = append(machines, mi.Instance)
 	}
 	return machines, nil

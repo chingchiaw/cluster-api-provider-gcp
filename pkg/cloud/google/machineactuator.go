@@ -29,7 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/glog"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	compute "google.golang.org/api/compute/v1"
@@ -254,7 +253,7 @@ func (gce *GCEClient) Create(ctx context.Context, cluster *clusterv1.Cluster, ma
 	}
 
 	if instance != nil {
-		glog.Infof("Skipped creating a VM that already exists.\n")
+		klog.Infof("Skipped creating a VM that already exists.\n")
 		return nil
 	}
 
@@ -349,28 +348,8 @@ func (gce *GCEClient) create(ctx context.Context, cluster *clusterv1.Cluster, ma
 					compute.CloudPlatformScope,
 				},
 			},
-		})
-
-		if err == nil {
-			err = gce.computeService.WaitForOperation(clusterConfig.Project, op)
-		}
-
-		if err != nil {
-			return gce.handleMachineError(machine, apierrors.CreateMachine(
-				"error creating GCE instance: %v", err), createEventAction)
-		}
-
-		gce.eventRecorder.Eventf(machine, corev1.EventTypeNormal, "Created", "Created Machine %v", machine.Name)
-		// If we have a v1Alpha1Client, then annotate the machine so that we
-		// remember exactly what VM we created for it.
-		if gce.client != nil {
-			return gce.updateAnnotations(cluster, machine)
-		}
-	} else {
-		klog.Infof("Skipped creating a VM that already exists.\n")
-	}
-
-	return nil
+		},
+	})
 }
 
 func (gce *GCEClient) Delete(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
@@ -464,7 +443,7 @@ func (gce *GCEClient) Update(ctx context.Context, cluster *clusterv1.Cluster, go
 		if err != nil {
 			return err
 		}
-		glog.Infof("Populating current state for bootstrap machine %v", goalMachine.ObjectMeta.Name)
+		klog.Infof("Populating current state for bootstrap machine %v", goalMachine.ObjectMeta.Name)
 		return gce.updateAnnotations(ctx, cluster, goalMachine)
 	}
 
@@ -569,12 +548,11 @@ func (gce *GCEClient) updateAnnotations(ctx context.Context, cluster *clusterv1.
 	machine.ObjectMeta.Annotations[ProjectAnnotationKey] = machineConfig.Project
 	machine.ObjectMeta.Annotations[ZoneAnnotationKey] = zone
 	machine.ObjectMeta.Annotations[NameAnnotationKey] = name
-	if err := gce.client.Update(ctx, machine); err != nil {
-		return err
+	if machine.Spec.ProviderID == nil ||  *machine.Spec.ProviderID == "" {
+		id := fmt.Sprintf("gce://%s/%s/%s", machineConfig.Project, zone, name)
+		machine.Spec.ProviderID = &id
 	}
-	id := fmt.Sprintf("gce://%s/%s/%s", machineConfig.Project, zone, name)
-	machine.Spec.ProviderID = &id
-	if err := gce.client.Status().Update(ctx, machine); err != nil {
+	if err := gce.client.Update(ctx, machine); err != nil {
 		return err
 	}
 	return gce.updateInstanceStatus(ctx, machine)
@@ -674,10 +652,10 @@ func (gce *GCEClient) validateMachine(machine *clusterv1.Machine, config *gcecon
 	}
 	if config.InstanceTemplate != "" {
 		if config.OS != "" {
-			glog.Warning("machine.Spec.InstanceTemplate is set; machine.Spec.OS ignored")
+			klog.Warning("machine.Spec.InstanceTemplate is set; machine.Spec.OS ignored")
 		}
 		if len(config.Disks) > 0 {
-			glog.Warning("machine.Spec.InstanceTemplate is set; machine.Spec.Disks ignored")
+			klog.Warning("machine.Spec.InstanceTemplate is set; machine.Spec.Disks ignored")
 		}
 	}
 	return nil
@@ -688,7 +666,7 @@ func (gce *GCEClient) validateMachine(machine *clusterv1.Machine, config *gcecon
 // cluster installation, it will operate as a no-op. It also returns the
 // original error for convenience, so callers can do "return handleMachineError(...)".
 func (gce *GCEClient) handleMachineError(ctx context.Context, machine *clusterv1.Machine, err *apierrors.MachineError, eventAction string) error {
-	glog.Errorf("Machine error: %v", err.Message)
+	klog.Errorf("Machine error: %v", err.Message)
 	if gce.client != nil {
 		reason := err.Reason
 		message := err.Message
@@ -790,7 +768,7 @@ func getOrNewComputeServiceForMachine(computeService GCEClientComputeService, cl
 	var err error
 	// If specified in the GCE config, use the alternative authentication.
 	if cloudConfigPath != "" {
-		glog.Info("Trying to get open the GCE config")
+		klog.Info("Trying to get open the GCE config")
 		client, err = clientWithAltTokenSource(cloudConfigPath)
 		if err != nil {
 			klog.Fatalf("Error creating an alternative auth client: %q", err)

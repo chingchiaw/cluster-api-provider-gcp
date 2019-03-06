@@ -26,7 +26,6 @@ import (
 	"path"
 	"time"
 
-	"github.com/golang/glog"
 	compute "google.golang.org/api/compute/v1"
 	"k8s.io/klog"
 )
@@ -148,8 +147,8 @@ func (c *ComputeService) InstanceGroupManagersListInstances(ctx context.Context,
 }
 
 func (c *ComputeService) WaitForOperation(ctx context.Context, project string, op *compute.Operation) error {
-	glog.Infof("Wait for %v %q...", op.OperationType, op.Name)
-	defer glog.Infof("Finish wait for %v %q...", op.OperationType, op.Name)
+	klog.Infof("Wait for %v %q...", op.OperationType, op.Name)
+	defer klog.Infof("Finish wait for %v %q...", op.OperationType, op.Name)
 
 	start := time.Now()
 	ctx, cf := context.WithTimeout(ctx, gceTimeout)

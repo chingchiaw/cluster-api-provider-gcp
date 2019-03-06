@@ -22,10 +22,11 @@ import (
 	"path"
 	"time"
 
-	"github.com/golang/glog"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog"
+	gceconfigv1 "sigs.k8s.io/cluster-api-provider-gcp/pkg/apis/gceproviderconfig/v1alpha1"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 	"sigs.k8s.io/cluster-api/pkg/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -116,7 +118,7 @@ func (r *ReconcileMachineSet) MachineSetToMachines(o handler.MapObject) []reconc
 	key := client.ObjectKey{Namespace: o.Meta.GetNamespace(), Name: o.Meta.GetName()}
 	err := r.Client.Get(context.Background(), key, m)
 	if err != nil {
-		glog.Errorf("Unable to retrieve Machine %v from store: %v", key, err)
+		klog.Errorf("Unable to retrieve Machine %v from store: %v", key, err)
 		return nil
 	}
 
@@ -128,7 +130,7 @@ func (r *ReconcileMachineSet) MachineSetToMachines(o handler.MapObject) []reconc
 
 	mss := r.getMachineSetsForMachine(m)
 	if len(mss) == 0 {
-		glog.V(4).Infof("Found no machine set for machine: %v", m.Name)
+		klog.V(4).Infof("Found no machine set for machine: %v", m.Name)
 		return nil
 	}
 
@@ -162,7 +164,7 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 	}
 
 	name := machineSet.Name
-	glog.V(4).Infof("Reconcile machineset %v", name)
+	klog.V(4).Infof("Reconcile machineset %v", name)
 
 	// If object hasn't been deleted and doesn't have a finalizer, add one
 	// Add a finalizer to newly created objects.
@@ -170,7 +172,7 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 		!util.Contains(machineSet.ObjectMeta.Finalizers, MachineSetFinalizer) {
 		machineSet.Finalizers = append(machineSet.Finalizers, MachineSetFinalizer)
 		if err = r.Client.Update(ctx, machineSet); err != nil {
-			glog.Infof("failed to add finalizer to MachineSet object %v due to error %v.", name, err)
+			klog.Infof("failed to add finalizer to MachineSet object %v due to error %v.", name, err)
 			return reconcile.Result{}, err
 		}
 	}
@@ -178,21 +180,21 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 	if !machineSet.ObjectMeta.DeletionTimestamp.IsZero() {
 		// no-op if finalizer has been removed.
 		if !util.Contains(machineSet.ObjectMeta.Finalizers, MachineSetFinalizer) {
-			glog.Infof("reconciling MachineSet object %v causes a no-op as there is no finalizer.", name)
+			klog.Infof("reconciling MachineSet object %v causes a no-op as there is no finalizer.", name)
 			return reconcile.Result{}, nil
 		}
 
-		glog.Infof("reconciling MachineSet object %v triggers delete.", name)
+		klog.Infof("reconciling MachineSet object %v triggers delete.", name)
 		if err := r.actuator.Delete(ctx, machineSet); err != nil {
-			glog.Errorf("Error deleting MachineSet object %v; %v", name, err)
+			klog.Errorf("Error deleting MachineSet object %v; %v", name, err)
 			return reconcile.Result{}, err
 		}
 
 		// Remove finalizer on successful deletion.
-		glog.Infof("MachineSet object %v deletion successful, removing finalizer.", name)
+		klog.Infof("MachineSet object %v deletion successful, removing finalizer.", name)
 		machineSet.ObjectMeta.Finalizers = util.Filter(machineSet.ObjectMeta.Finalizers, MachineSetFinalizer)
 		if err := r.Client.Update(context.Background(), machineSet); err != nil {
-			glog.Errorf("Error removing finalizer from MachineSet object %v; %v", name, err)
+			klog.Errorf("Error removing finalizer from MachineSet object %v; %v", name, err)
 			return reconcile.Result{}, err
 		}
 		return reconcile.Result{}, nil
@@ -221,7 +223,7 @@ func (r *ReconcileMachineSet) Reconcile(request reconcile.Request) (reconcile.Re
 
 	syncErr := r.syncReplicas(ctx, machineSet, filteredMachines)
 	if syncErr != nil {
-		glog.Error(syncErr)
+		klog.Error(syncErr)
 	}
 
 	ms := machineSet.DeepCopy()
@@ -278,7 +280,7 @@ func (c *ReconcileMachineSet) scaleDown(ctx context.Context, ms *clusterv1.Machi
 			return nil
 		}
 		if err := c.Client.Delete(ctx, m); err != nil {
-			glog.Errorf("unable to delete a machine = %s, due to %v", m.Name, err)
+			klog.Errorf("unable to delete a machine = %s, due to %v", m.Name, err)
 			return err
 		}
 		toDelete--
@@ -293,10 +295,10 @@ func (c *ReconcileMachineSet) scale(ctx context.Context, ms *clusterv1.MachineSe
 	}
 	desired := int64(*ms.Spec.Replicas)
 	if desired < current {
-		glog.Infof("Resizing down, desired %d, current %d", desired, current)
+		klog.Infof("Resizing down, desired %d, current %d", desired, current)
 		return c.scaleDown(ctx, ms, machines, current-desired)
 	}
-	glog.Infof("Resizing up, desired %d, current %d", desired, current)
+	klog.Infof("Resizing up, desired %d, current %d", desired, current)
 	return c.actuator.Resize(ctx, ms)
 }
 
@@ -312,13 +314,13 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1.Ma
 	}
 
 	if err := c.scale(ctx, ms, machines); err != nil {
-		glog.Errorf("Scaling machineset %v failed: %v", ms.Name, err)
+		klog.Errorf("Scaling machineset %v failed: %v", ms.Name, err)
 		return err
 	}
 
 	vms, err := c.actuator.ListMachines(ctx, ms)
 	if err != nil {
-		glog.Errorf("Error listing machines for machine set %v after resize: %v", ms.Name, err)
+		klog.Errorf("Error listing machines for machine set %v after resize: %v", ms.Name, err)
 		return err
 	}
 
@@ -327,10 +329,13 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1.Ma
 		vm := path.Base(vmURL)
 		existingVMs[vm] = true
 		if !existingMachines[vm] {
-			machine := newMachine(vm, ms)
-			err := c.Client.Create(ctx, machine)
+			machine, err := newMachine(vm, ms)
 			if err != nil {
-				glog.Errorf("unable to create a machine = %s, due to %v", machine.Name, err)
+				klog.Errorf("unable to create a machine = %s, due to %v", machine.Name, err)
+				continue
+			}
+			if err := c.Client.Create(ctx, machine); err != nil {
+				klog.Errorf("unable to create a machine = %s, due to %v", machine.Name, err)
 			}
 		}
 	}
@@ -342,7 +347,7 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1.Ma
 		if !existingVMs[m.Name] {
 			err := c.Client.Delete(ctx, m)
 			if err != nil {
-				glog.Errorf("unable to delete a machine = %s, due to %v", m.Name, err)
+				klog.Errorf("unable to delete a machine = %s, due to %v", m.Name, err)
 			}
 		}
 	}
@@ -352,7 +357,7 @@ func (c *ReconcileMachineSet) syncReplicas(ctx context.Context, ms *clusterv1.Ma
 
 // newMachine news a machine resource.
 // the name of the newly newd resource is going to be newd by the API server, we set the generateName field
-func newMachine(machineName string, ms *clusterv1.MachineSet) *clusterv1.Machine {
+func newMachine(machineName string, ms *clusterv1.MachineSet) (*clusterv1.Machine, error) {
 	gv := clusterv1.SchemeGroupVersion
 	machine := &clusterv1.Machine{
 		TypeMeta: metav1.TypeMeta{
@@ -362,21 +367,36 @@ func newMachine(machineName string, ms *clusterv1.MachineSet) *clusterv1.Machine
 		ObjectMeta: ms.Spec.Template.ObjectMeta,
 		Spec:       ms.Spec.Template.Spec,
 	}
-	machine.ObjectMeta.Name = machineName
-	machine.ObjectMeta.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(ms, controllerKind)}
+	machine.Name = machineName
+	machine.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(ms, controllerKind)}
 	machine.Namespace = ms.Namespace
 	if machine.Annotations == nil {
 		machine.Annotations = make(map[string]string)
 	}
 	machine.Annotations[MIGMachineSetAnnotation] = ms.Name
-	return machine
+
+	machineConfig, err := machineProviderFromProviderSpec(machine.Spec.ProviderSpec)
+	if err != nil {
+		return nil, err
+	}
+	id := fmt.Sprintf("gce://%s/%s/%s", machineConfig.Project, machineConfig.Zone, machineName)
+	machine.Spec.ProviderID = &id
+	return machine, nil
+}
+
+func machineProviderFromProviderSpec(providerSpec clusterv1.ProviderSpec) (*gceconfigv1.GCEMachineProviderSpec, error) {
+	var config gceconfigv1.GCEMachineProviderSpec
+	if err := yaml.Unmarshal(providerSpec.Value.Raw, &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
 
 // shoudExcludeMachine returns true if the machine should be filtered out, false otherwise.
 func shouldExcludeMachine(ms *clusterv1.MachineSet, machine *clusterv1.Machine) bool {
 	// Ignore inactive machines.
 	if metav1.GetControllerOf(machine) != nil && !metav1.IsControlledBy(machine, ms) {
-		glog.V(4).Infof("%s not controlled by %v", machine.Name, ms.Name)
+		klog.V(4).Infof("%s not controlled by %v", machine.Name, ms.Name)
 		return true
 	}
 	return false

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/golang/glog"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/compute/v1"
 	"k8s.io/klog"
@@ -58,7 +57,7 @@ func NewClusterActuator(m manager.Manager, params ClusterActuatorParams) (*GCECl
 }
 
 func (gce *GCEClusterClient) Reconcile(cluster *clusterv1.Cluster) error {
-	glog.Infof("Reconciling cluster %v.", cluster.Name)
+	klog.Infof("Reconciling cluster %v.", cluster.Name)
 	ctx := context.TODO()
 	err := gce.createFirewallRuleIfNotExists(ctx, cluster, &compute.Firewall{
 		Name:    cluster.Name + firewallRuleInternalSuffix,
